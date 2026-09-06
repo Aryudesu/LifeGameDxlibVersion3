@@ -6,19 +6,13 @@
 #include "DxLib.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
-#include <utility>
-#include <vector>
 
 namespace ShapeDrawing {
 
 using Coord = InfiniteLifeBoard::Coord;
-
-struct Cell {
-    Coord x = 0;
-    Coord y = 0;
-};
 
 enum class Tool {
     Cell,
@@ -85,7 +79,8 @@ inline bool visitCircle(Coord cx, Coord cy, Coord edgeX, Coord edgeY, Visitor&& 
     const std::uint64_t dy = distance(cy, edgeY);
     if (dx > maxRadius || dy > maxRadius) return false;
 
-    const long double r2 = static_cast<long double>(dx) * dx + static_cast<long double>(dy) * dy;
+    const long double r2 = static_cast<long double>(dx) * static_cast<long double>(dx) +
+                           static_cast<long double>(dy) * static_cast<long double>(dy);
     const std::uint64_t radius = static_cast<std::uint64_t>(std::sqrt(r2) + 0.5L);
     if (radius > maxRadius) return false;
 
