@@ -1,5 +1,23 @@
 #include "InfiniteCamera.h"
 
+void InfiniteCamera::panByPixels(int deltaScreenX, int deltaScreenY) noexcept {
+    panRemainderX_ -= deltaScreenX;
+    panRemainderY_ -= deltaScreenY;
+
+    const int deltaCellsX = panRemainderX_ / cellSize_;
+    const int deltaCellsY = panRemainderY_ / cellSize_;
+
+    panRemainderX_ -= deltaCellsX * cellSize_;
+    panRemainderY_ -= deltaCellsY * cellSize_;
+
+    move(deltaCellsX, deltaCellsY);
+}
+
+void InfiniteCamera::endPan() noexcept {
+    panRemainderX_ = 0;
+    panRemainderY_ = 0;
+}
+
 bool InfiniteCamera::zoomInAt(int screenX, int screenY, int maxCellSize) noexcept {
     if (cellSize_ >= maxCellSize) return false;
     return zoomAt(screenX, screenY, cellSize_ * 2);
@@ -16,6 +34,7 @@ bool InfiniteCamera::zoomAt(int screenX, int screenY, int newCellSize) noexcept 
     cellSize_ = newCellSize;
     x_ = anchorX - screenX / cellSize_;
     y_ = anchorY - screenY / cellSize_;
+    endPan();
     return true;
 }
 

@@ -12,6 +12,18 @@ Version 2 の有限 BitBoard 版を土台にしつつ、Version 3 では **仮�
 - Camera は無限平面を自由に移動する
 - 最初は分かりやすい Sparse Chunk 実装を優先し、後から BitBoard 化・アクティブ Chunk 最適化・HashLife 等を検討する
 
+## 現在の操作
+
+- `Enter`: pause / resume
+- `Space`: pause 中に1世代進める
+- `PageUp / PageDown`: シミュレーション速度変更
+- 矢印キー: Camera移動
+- マウスホイール: カーソル基準ズーム
+- 中ボタンドラッグ: Camera移動
+- pause 中 + 左ドラッグ: 生存セルを連続配置
+- pause 中 + 右ドラッグ: セルを連続削除
+- `Delete`: 全消去してpause
+
 ## 最初のマイルストーン
 
 1. Sparse Chunk 盤面
