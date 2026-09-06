@@ -8,6 +8,7 @@
 #include <fstream>
 #include <new>
 #include <string>
+#include <utility>
 #include <windows.h>
 
 namespace {
