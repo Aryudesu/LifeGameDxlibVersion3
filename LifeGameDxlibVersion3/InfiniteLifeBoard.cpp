@@ -65,8 +65,8 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
         if ((chunk.rows[ly] & cellMask) == 0) {
             chunk.rows[ly] |= cellMask;
             chunk.nonEmptyRows |= rowMask;
-            if ((chunk.rows[ly] & WestEdgeMask) != 0) chunk.westEdgeRows |= rowMask;
-            if ((chunk.rows[ly] & EastEdgeMask) != 0) chunk.eastEdgeRows |= rowMask;
+            if (lx == 0) chunk.westEdgeRows |= rowMask;
+            if (lx == ChunkSize - 1) chunk.eastEdgeRows |= rowMask;
             ++aliveCellCount_;
         }
         return;
@@ -78,8 +78,8 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
     Chunk& chunk = it->second;
     chunk.rows[ly] &= ~cellMask;
     if (chunk.rows[ly] == 0) chunk.nonEmptyRows &= ~rowMask;
-    if ((chunk.rows[ly] & WestEdgeMask) == 0) chunk.westEdgeRows &= ~rowMask;
-    if ((chunk.rows[ly] & EastEdgeMask) == 0) chunk.eastEdgeRows &= ~rowMask;
+    if (lx == 0 && (chunk.rows[ly] & WestEdgeMask) == 0) chunk.westEdgeRows &= ~rowMask;
+    if (lx == ChunkSize - 1 && (chunk.rows[ly] & EastEdgeMask) == 0) chunk.eastEdgeRows &= ~rowMask;
     --aliveCellCount_;
     if (chunk.empty()) chunks_.erase(it);
 }
@@ -201,8 +201,6 @@ void InfiniteLifeBoard::step() {
         const Chunk* south = neighborhood[2][1];
         const Chunk* southEast = neighborhood[2][2];
 
-        // Only rows at distance <= 1 from a live source row can change. For
-        // horizontal neighboring chunks, only edge cells can affect this chunk.
         std::uint64_t sourceRows = center == nullptr ? 0 : center->nonEmptyRows;
         if (west != nullptr) sourceRows |= west->eastEdgeRows;
         if (east != nullptr) sourceRows |= east->westEdgeRows;
