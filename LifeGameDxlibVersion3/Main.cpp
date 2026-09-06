@@ -44,7 +44,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousEnter = false;
     bool previousSpace = false;
     bool previousDelete = false;
-    bool previousLeft = false;
     bool previousPageUp = false;
     bool previousPageDown = false;
     std::uint64_t generation = 0;
@@ -106,6 +105,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const int mouseDeltaY = mouseY - previousMouseY;
         const int mouseInput = GetMouseInput();
         const bool left = (mouseInput & MOUSE_INPUT_LEFT) != 0;
+        const bool right = (mouseInput & MOUSE_INPUT_RIGHT) != 0;
         const bool middle = (mouseInput & MOUSE_INPUT_MIDDLE) != 0;
 
         if (middle) camera.panByPixels(mouseDeltaX, mouseDeltaY);
@@ -122,9 +122,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
         }
 
-        if (paused && left && !previousLeft) {
+        if (paused && (left || right) && !middle) {
             const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
-            board.setAlive(x, y, !board.isAlive(x, y));
+            board.setAlive(x, y, left && !right);
         }
 
         if (paused) {
@@ -160,7 +160,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawString(8, 96, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
         DrawString(8, 118, "Enter: pause  Space: step  PageUp/PageDown: speed", GetColor(180, 180, 180));
         DrawString(8, 140, "Arrows / Middle drag: move  Wheel: zoom", GetColor(180, 180, 180));
-        DrawString(8, 162, "Paused + Left click: toggle cell  Delete: clear", GetColor(180, 180, 180));
+        DrawString(8, 162, "Paused: Left drag = alive  Right drag = dead  Delete: clear", GetColor(180, 180, 180));
         ScreenFlip();
 
         ++fpsFrameCount;
@@ -175,7 +175,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousEnter = enter;
         previousSpace = space;
         previousDelete = del;
-        previousLeft = left;
         previousPageUp = pageUp;
         previousPageDown = pageDown;
         previousMouseX = mouseX;
