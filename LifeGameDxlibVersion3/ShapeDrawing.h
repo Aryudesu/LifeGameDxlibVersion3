@@ -15,12 +15,7 @@ namespace ShapeDrawing {
 
 using Coord = InfiniteLifeBoard::Coord;
 
-enum class Tool {
-    Cell,
-    Line,
-    Rectangle,
-    Circle
-};
+enum class Tool { Cell, Line, Rectangle, Circle };
 
 inline const char* toolName(Tool tool) noexcept {
     switch (tool) {
@@ -50,12 +45,12 @@ inline bool offsetCoord(Coord origin, std::uint64_t magnitude, bool positive, Co
     return true;
 }
 
-// Shift constraint used by the interactive shape tools.
-// Line snaps to the nearest multiple of 45 degrees. Rectangle becomes a square.
-// Circle is already constrained by definition, so its endpoint is unchanged.
-inline std::pair<Coord, Coord> constrainedEnd(Tool tool,
-                                               Coord x0, Coord y0,
-                                               Coord x1, Coord y1,
+inline bool shiftConstraintActive() noexcept {
+    return CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
+}
+
+// Shift: Line -> nearest 45-degree direction, Rectangle -> square.
+inline std::pair<Coord, Coord> constrainedEnd(Tool tool, Coord x0, Coord y0, Coord x1, Coord y1,
                                                bool constrain) noexcept {
     if (!constrain || (tool != Tool::Line && tool != Tool::Rectangle)) return {x1, y1};
 
@@ -63,28 +58,25 @@ inline std::pair<Coord, Coord> constrainedEnd(Tool tool,
     const std::uint64_t dy = distance(y0, y1);
     const bool positiveX = x1 >= x0;
     const bool positiveY = y1 >= y0;
-
     std::uint64_t snappedX = dx;
     std::uint64_t snappedY = dy;
 
     if (tool == Tool::Rectangle) {
-        // Use the larger drag component so the square continues to reach the pointer's extent.
         const std::uint64_t side = std::max(dx, dy);
         snappedX = side;
         snappedY = side;
     } else {
-        // tan(22.5 deg) ~= 0.4142 and tan(67.5 deg) ~= 2.4142.
-        // Long double keeps the comparison safe even near the int64 coordinate limits.
-        const long double fx = static_cast<long double>(dx);
-        const long double fy = static_cast<long double>(dy);
         constexpr long double Tan22_5 = 0.4142135623730950488L;
         constexpr long double Tan67_5 = 2.4142135623730950488L;
+        const long double fx = static_cast<long double>(dx);
+        const long double fy = static_cast<long double>(dy);
         if (fy <= fx * Tan22_5) {
             snappedY = 0;
         } else if (fy >= fx * Tan67_5) {
             snappedX = 0;
         } else {
-            const std::uint64_t diagonal = (dx / 2) + (dy / 2) + ((dx & 1U) && (dy & 1U) ? 1U : 0U);
+            // Projection onto a 45-degree line: t = (|dx| + |dy|) / 2.
+            const std::uint64_t diagonal = dx / 2 + dy / 2 + (((dx & 1U) + (dy & 1U)) >= 1U ? 1U : 0U);
             snappedX = diagonal;
             snappedY = diagonal;
         }
@@ -103,13 +95,11 @@ inline bool visitLine(Coord x0, Coord y0, Coord x1, Coord y1, Visitor&& visitor,
     const std::uint64_t spanX = distance(x0, x1);
     const std::uint64_t spanY = distance(y0, y1);
     if (std::max(spanX, spanY) > maxSpan) return false;
-
     const std::int64_t dx = static_cast<std::int64_t>(spanX);
     const std::int64_t dy = -static_cast<std::int64_t>(spanY);
     const int sx = x0 < x1 ? 1 : -1;
     const int sy = y0 < y1 ? 1 : -1;
     std::int64_t error = dx + dy;
-
     for (;;) {
         visitor(x0, y0);
         if (x0 == x1 && y0 == y1) break;
@@ -139,7 +129,6 @@ inline bool visitCircle(Coord cx, Coord cy, Coord edgeX, Coord edgeY, Visitor&& 
     const std::uint64_t dx = distance(cx, edgeX);
     const std::uint64_t dy = distance(cy, edgeY);
     if (dx > maxRadius || dy > maxRadius) return false;
-
     const long double r2 = static_cast<long double>(dx) * static_cast<long double>(dx) +
                            static_cast<long double>(dy) * static_cast<long double>(dy);
     const std::uint64_t radius = static_cast<std::uint64_t>(std::sqrt(r2) + 0.5L);
@@ -157,10 +146,8 @@ inline bool visitCircle(Coord cx, Coord cy, Coord edgeX, Coord edgeY, Visitor&& 
     std::int64_t y = 0;
     std::int64_t error = 1 - x;
     while (x >= y) {
-        checkedVisit( x,  y); checkedVisit( y,  x);
-        checkedVisit(-y,  x); checkedVisit(-x,  y);
-        checkedVisit(-x, -y); checkedVisit(-y, -x);
-        checkedVisit( y, -x); checkedVisit( x, -y);
+        checkedVisit( x,  y); checkedVisit( y,  x); checkedVisit(-y,  x); checkedVisit(-x,  y);
+        checkedVisit(-x, -y); checkedVisit(-y, -x); checkedVisit( y, -x); checkedVisit( x, -y);
         ++y;
         if (error < 0) error += 2 * y + 1;
         else { --x; error += 2 * (y - x) + 1; }
@@ -170,19 +157,18 @@ inline bool visitCircle(Coord cx, Coord cy, Coord edgeX, Coord edgeY, Visitor&& 
 
 template <typename Visitor>
 inline bool visitShape(Tool tool, Coord x0, Coord y0, Coord x1, Coord y1, Visitor&& visitor) {
+    const auto [endX, endY] = constrainedEnd(tool, x0, y0, x1, y1, shiftConstraintActive());
     switch (tool) {
-    case Tool::Line: return visitLine(x0, y0, x1, y1, visitor);
-    case Tool::Rectangle: return visitRectangle(x0, y0, x1, y1, visitor);
-    case Tool::Circle: return visitCircle(x0, y0, x1, y1, visitor);
-    default: visitor(x1, y1); return true;
+    case Tool::Line: return visitLine(x0, y0, endX, endY, visitor);
+    case Tool::Rectangle: return visitRectangle(x0, y0, endX, endY, visitor);
+    case Tool::Circle: return visitCircle(x0, y0, endX, endY, visitor);
+    default: visitor(endX, endY); return true;
     }
 }
 
-inline void drawPreview(Tool tool,
-                        const InfiniteCamera& camera,
+inline void drawPreview(Tool tool, const InfiniteCamera& camera,
                         Coord x0, Coord y0, Coord x1, Coord y1,
-                        int boardWidth, int boardHeight,
-                        bool erase) {
+                        int boardWidth, int boardHeight, bool erase) {
     const unsigned int color = erase ? GetColor(255, 110, 110) : GetColor(80, 210, 255);
     const int size = camera.cellSize();
     visitShape(tool, x0, y0, x1, y1, [&](Coord x, Coord y) {
