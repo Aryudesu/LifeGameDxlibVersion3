@@ -67,7 +67,8 @@ inline void draw(Icon icon, int x, int y, unsigned int color, unsigned int panel
     }
 }
 
-inline void drawTooltip(int mouseX, int mouseY, const char* text) {
+inline void drawTooltip(int mouseX, int mouseY, const char* text,
+                        int screenWidth, int screenHeight) {
     if (text == nullptr || text[0] == '\0') return;
 
     constexpr int paddingX = 8;
@@ -77,10 +78,6 @@ inline void drawTooltip(int mouseX, int mouseY, const char* text) {
     const int fontSize = GetFontSize();
     const int width = textWidth + paddingX * 2;
     const int height = fontSize + paddingY * 2;
-
-    int screenWidth = 0;
-    int screenHeight = 0;
-    GetDrawScreenSize(&screenWidth, &screenHeight);
 
     int x = mouseX + gap;
     int y = mouseY + gap;
@@ -108,7 +105,6 @@ inline void drawButton(int mouseX, int mouseY, int x, int y, int size, Icon icon
 
     DrawBox(x, y, x + size - 1, y + size - 1, background, TRUE);
     draw(icon, x + (size - 24) / 2, y + (size - 24) / 2, foreground, background);
-    if (hover) drawTooltip(mouseX, mouseY, label(icon));
 }
 
 } // namespace ToolbarIcons
