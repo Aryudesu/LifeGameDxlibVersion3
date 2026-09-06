@@ -5,6 +5,7 @@
 #include "InfiniteLifeFile.h"
 #include "PatternLibrary.h"
 #include "PatternListScroll.h"
+#include "PatternPlacementPreview.h"
 #include "PerformanceLogger.h"
 
 #include <algorithm>
@@ -13,7 +14,6 @@
 #include <cstdint>
 #include <string>
 #include <thread>
-#include <utility>
 
 namespace {
 constexpr int BoardViewWidth = 1024;
@@ -61,36 +61,6 @@ void seedGlider(InfiniteLifeBoard& board) {
     board.setAlive(2, 2, true);
 }
 
-std::pair<int, int> rotatedCell(PatternCell cell, int rotation) noexcept {
-    switch (rotation & 3) {
-    case 1: return {-cell.y, cell.x};
-    case 2: return {-cell.x, -cell.y};
-    case 3: return {cell.y, -cell.x};
-    default: return {cell.x, cell.y};
-    }
-}
-
-std::pair<int, int> rotationOffset(const LifePattern& pattern, int rotation) noexcept {
-    int minX = 0;
-    int minY = 0;
-    for (const PatternCell cell : pattern.cells) {
-        const auto [x, y] = rotatedCell(cell, rotation);
-        minX = std::min(minX, x);
-        minY = std::min(minY, y);
-    }
-    return {-minX, -minY};
-}
-
-void placePattern(InfiniteLifeBoard& board, const LifePattern& pattern,
-                  InfiniteLifeBoard::Coord originX, InfiniteLifeBoard::Coord originY,
-                  int rotation) {
-    const auto [offsetX, offsetY] = rotationOffset(pattern, rotation);
-    for (const PatternCell cell : pattern.cells) {
-        const auto [rx, ry] = rotatedCell(cell, rotation);
-        board.setAlive(originX + rx + offsetX, originY + ry + offsetY, true);
-    }
-}
-
 std::size_t firstPatternInCategory(PatternCategory category) noexcept {
     for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
         if (PatternLibrary::at(i).category == category) return i;
@@ -101,14 +71,9 @@ std::size_t firstPatternInCategory(PatternCategory category) noexcept {
 void drawGrid(const InfiniteCamera& camera) {
     const int cellSize = camera.cellSize();
     if (cellSize <= 1) return;
-
     const unsigned int gridColor = GetColor(45, 45, 45);
-    for (int x = 0; x <= BoardViewWidth; x += cellSize) {
-        DrawLine(x, 0, x, ScreenHeight, gridColor);
-    }
-    for (int y = 0; y <= ScreenHeight; y += cellSize) {
-        DrawLine(0, y, BoardViewWidth, y, gridColor);
-    }
+    for (int x = 0; x <= BoardViewWidth; x += cellSize) DrawLine(x, 0, x, ScreenHeight, gridColor);
+    for (int y = 0; y <= ScreenHeight; y += cellSize) DrawLine(0, y, BoardViewWidth, y, gridColor);
 }
 } // namespace
 
@@ -142,6 +107,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousSaveShortcut = false;
     bool previousLoadShortcut = false;
     bool previousLeft = false;
+    bool previousRight = false;
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
     std::size_t selectedPatternIndex = 0;
@@ -155,8 +121,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     GetMousePoint(&previousMouseX, &previousMouseY);
 
     using Clock = std::chrono::steady_clock;
-    const auto targetFrameDuration = std::chrono::duration_cast<Clock::duration>(
-        std::chrono::duration<double>(1.0 / TargetFps));
+    const auto targetFrameDuration = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / TargetFps));
     auto previousFrameTime = Clock::now();
     auto nextFrameTime = previousFrameTime;
     auto fpsSampleStart = previousFrameTime;
@@ -176,31 +141,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool q = CheckHitKey(KEY_INPUT_Q) != 0;
         const bool e = CheckHitKey(KEY_INPUT_E) != 0;
         const bool g = CheckHitKey(KEY_INPUT_G) != 0;
+        const bool escape = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
         const bool ctrl = CheckHitKey(KEY_INPUT_LCONTROL) != 0 || CheckHitKey(KEY_INPUT_RCONTROL) != 0;
         const bool saveShortcut = ctrl && CheckHitKey(KEY_INPUT_S) != 0;
         const bool loadShortcut = ctrl && CheckHitKey(KEY_INPUT_L) != 0;
         const bool shift = CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
 
-        if (enter && !previousEnter) {
-            paused = !paused;
-            simulationAccumulator = 0.0;
-        }
-        if (del && !previousDelete) {
-            board.clear();
-            generation = 0;
-            paused = true;
-            simulationAccumulator = 0.0;
-        }
+        if (enter && !previousEnter) { paused = !paused; simulationAccumulator = 0.0; }
+        if (del && !previousDelete) { board.clear(); generation = 0; paused = true; simulationAccumulator = 0.0; }
         if (g && !previousG) showGrid = !showGrid;
+        if (escape && selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
 
         bool usedFileDialog = false;
         if (saveShortcut && !previousSaveShortcut) {
             std::string path;
             if (FileDialog::chooseSavePath(path)) {
                 std::string errorMessage;
-                if (!InfiniteLifeFile::save(board, generation, path, errorMessage)) {
-                    FileDialog::showError(errorMessage);
-                }
+                if (!InfiniteLifeFile::save(board, generation, path, errorMessage)) FileDialog::showError(errorMessage);
             }
             usedFileDialog = true;
         }
@@ -211,9 +168,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 if (InfiniteLifeFile::load(board, generation, path, errorMessage)) {
                     paused = true;
                     simulationAccumulator = 0.0;
-                } else {
-                    FileDialog::showError(errorMessage);
-                }
+                } else FileDialog::showError(errorMessage);
             }
             usedFileDialog = true;
         }
@@ -225,14 +180,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             fpsFrameCount = 0;
         }
 
-        if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) {
-            ++simulationSpeedIndex;
-            simulationAccumulator = 0.0;
-        }
-        if (pageDown && !previousPageDown && simulationSpeedIndex > 0) {
-            --simulationSpeedIndex;
-            simulationAccumulator = 0.0;
-        }
+        if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) { ++simulationSpeedIndex; simulationAccumulator = 0.0; }
+        if (pageDown && !previousPageDown && simulationSpeedIndex > 0) { --simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (p && !previousP) {
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
             else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
@@ -250,8 +199,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (CheckHitKey(KEY_INPUT_UP)) camera.move(0, -4);
         if (CheckHitKey(KEY_INPUT_DOWN)) camera.move(0, 4);
 
-        int mouseX = 0;
-        int mouseY = 0;
+        int mouseX = 0, mouseY = 0;
         GetMousePoint(&mouseX, &mouseY);
         const int mouseDeltaX = mouseX - previousMouseX;
         const int mouseDeltaY = mouseY - previousMouseY;
@@ -260,13 +208,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool right = (mouseInput & MOUSE_INPUT_RIGHT) != 0;
         const bool middle = (mouseInput & MOUSE_INPUT_MIDDLE) != 0;
         const bool leftPressed = left && !previousLeft;
+        const bool rightPressed = right && !previousRight;
         const int wheel = GetMouseWheelRotVol();
         const bool mouseOnBoard = mouseX >= 0 && mouseX < BoardViewWidth && mouseY >= 0 && mouseY < ScreenHeight;
         const bool mouseOnPanel = mouseX >= PanelX && mouseX < WindowWidth && mouseY >= 0 && mouseY < ScreenHeight;
 
-        if (mouseOnPanel && inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) {
-            patternListScroll.scroll(toolCategory, wheel);
-        }
+        if (mouseOnPanel && inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) patternListScroll.scroll(toolCategory, wheel);
 
         if (mouseOnPanel && leftPressed) {
             if (inRect(mouseX, mouseY, PanelContentX, 42, WindowWidth - PanelPadding, 72)) {
@@ -275,10 +222,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             } else {
                 bool handled = false;
                 for (std::size_t i = 0; i < ToolCategories.size() && !handled; ++i) {
-                    const int column = static_cast<int>(i % 2);
-                    const int row = static_cast<int>(i / 2);
-                    const int leftX = PanelContentX + column * 144;
-                    const int top = 86 + row * 36;
+                    const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
+                    const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
                     if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
                         toolCategory = ToolCategories[i];
                         selectedPatternIndex = firstPatternInCategory(toolCategory);
@@ -287,7 +232,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                         handled = true;
                     }
                 }
-
                 if (!handled) {
                     const int scrollOffset = patternListScroll.offset(toolCategory);
                     int categoryRow = 0;
@@ -295,73 +239,48 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                         const LifePattern& pattern = PatternLibrary::at(i);
                         if (pattern.category != toolCategory) continue;
                         if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
-                            const int visibleRow = categoryRow - scrollOffset;
-                            const int top = PatternListY + visibleRow * PatternRowHeight;
+                            const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
                             if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
-                                selectedPatternIndex = i;
-                                patternRotation = 0;
-                                handled = true;
-                                break;
+                                selectedPatternIndex = i; patternRotation = 0; handled = true; break;
                             }
                         }
                         ++categoryRow;
                     }
                 }
-
                 if (!handled && selectedPatternIndex != 0) {
-                    if (inRect(mouseX, mouseY, RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight)) {
-                        patternRotation = (patternRotation + 3) & 3;
-                    } else if (inRect(mouseX, mouseY, RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight)) {
-                        patternRotation = 0;
-                    } else if (inRect(mouseX, mouseY, RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight)) {
-                        patternRotation = (patternRotation + 1) & 3;
-                    }
+                    if (inRect(mouseX, mouseY, RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 3) & 3;
+                    else if (inRect(mouseX, mouseY, RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight)) patternRotation = 0;
+                    else if (inRect(mouseX, mouseY, RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 1) & 3;
                 }
             }
         }
 
         if (mouseOnBoard) {
-            if (middle) camera.panByPixels(mouseDeltaX, mouseDeltaY);
-            else camera.endPan();
-
-            if (wheel > 0) {
-                for (int i = 0; i < wheel; ++i) {
-                    if (!camera.zoomInAt(mouseX, mouseY, MaxCellSize)) break;
-                }
-            } else if (wheel < 0) {
-                for (int i = 0; i < -wheel; ++i) {
-                    if (!camera.zoomOutAt(mouseX, mouseY, MinCellSize)) break;
-                }
-            }
+            if (middle) camera.panByPixels(mouseDeltaX, mouseDeltaY); else camera.endPan();
+            if (wheel > 0) for (int i = 0; i < wheel; ++i) { if (!camera.zoomInAt(mouseX, mouseY, MaxCellSize)) break; }
+            else if (wheel < 0) for (int i = 0; i < -wheel; ++i) { if (!camera.zoomOutAt(mouseX, mouseY, MinCellSize)) break; }
 
             if (paused && !middle) {
-                const LifePattern& pattern = PatternLibrary::at(selectedPatternIndex);
                 const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
-                if (pattern.category == PatternCategory::Cell) {
+                if (selectedPatternIndex == 0) {
                     if (left || right) board.setAlive(x, y, left && !right);
-                } else if (leftPressed) {
-                    placePattern(board, pattern, x, y, patternRotation);
+                } else {
+                    const LifePattern& pattern = PatternLibrary::at(selectedPatternIndex);
+                    if (rightPressed) { selectedPatternIndex = 0; patternRotation = 0; }
+                    else if (leftPressed) PatternPlacementPreview::place(board, pattern, x, y, patternRotation);
                 }
             }
-        } else {
-            camera.endPan();
-        }
+        } else camera.endPan();
 
         if (paused) {
             simulationAccumulator = 0.0;
-            if (space && !previousSpace) {
-                board.step();
-                ++generation;
-            }
+            if (space && !previousSpace) { board.step(); ++generation; }
         } else {
             const double simulationSeconds = std::min(elapsedSeconds, MaxSimulationDeltaSeconds);
             simulationAccumulator += simulationSeconds * SimulationSpeeds[simulationSpeedIndex];
             const int generationsToAdvance = static_cast<int>(simulationAccumulator);
             simulationAccumulator -= generationsToAdvance;
-            for (int i = 0; i < generationsToAdvance; ++i) {
-                board.step();
-                ++generation;
-            }
+            for (int i = 0; i < generationsToAdvance; ++i) { board.step(); ++generation; }
         }
 
         ClearDrawScreen();
@@ -370,13 +289,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const auto [sx, sy] = camera.boardToScreen(x, y);
             const int size = camera.cellSize();
             if (sx + size <= 0 || sy + size <= 0 || sx >= BoardViewWidth || sy >= ScreenHeight) return;
-            if (size == 1) {
-                DrawPixel(sx, sy, aliveColor);
-            } else {
-                DrawBox(sx, sy, sx + size - 1, sy + size - 1, aliveColor, TRUE);
-            }
+            if (size == 1) DrawPixel(sx, sy, aliveColor);
+            else DrawBox(sx, sy, sx + size - 1, sy + size - 1, aliveColor, TRUE);
         });
         if (showGrid) drawGrid(camera);
+
+        if (paused && mouseOnBoard && !middle && selectedPatternIndex != 0) {
+            const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
+            PatternPlacementPreview::draw(camera, PatternLibrary::at(selectedPatternIndex), previewX, previewY,
+                                          patternRotation, BoardViewWidth, ScreenHeight);
+        }
 
         const unsigned int background = GetColor(28, 30, 34);
         const unsigned int section = GetColor(45, 48, 54);
@@ -385,18 +307,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const unsigned int muted = GetColor(170, 175, 180);
         DrawBox(PanelX, 0, WindowWidth, ScreenHeight, background, TRUE);
         DrawString(PanelContentX, 14, "LIFE GAME TOOLS", text);
-
-        DrawBox(PanelContentX, 42, WindowWidth - PanelPadding, 72,
-                selectedPatternIndex == 0 ? selected : section, TRUE);
+        DrawBox(PanelContentX, 42, WindowWidth - PanelPadding, 72, selectedPatternIndex == 0 ? selected : section, TRUE);
         DrawString(PanelContentX + 10, 49, "Cell", text);
 
         for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
-            const int column = static_cast<int>(i % 2);
-            const int row = static_cast<int>(i / 2);
-            const int leftX = PanelContentX + column * 144;
-            const int top = 86 + row * 36;
-            DrawBox(leftX, top, leftX + 136, top + 28,
-                    selectedPatternIndex != 0 && toolCategory == ToolCategories[i] ? selected : section, TRUE);
+            const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
+            const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
+            DrawBox(leftX, top, leftX + 136, top + 28, selectedPatternIndex != 0 && toolCategory == ToolCategories[i] ? selected : section, TRUE);
             DrawString(leftX + 8, top + 6, PatternLibrary::categoryName(ToolCategories[i]), text);
         }
 
@@ -406,10 +323,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const LifePattern& pattern = PatternLibrary::at(i);
             if (pattern.category != toolCategory) continue;
             if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
-                const int visibleRow = categoryRow - scrollOffset;
-                const int top = PatternListY + visibleRow * PatternRowHeight;
-                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24,
-                        selectedPatternIndex == i ? selected : section, TRUE);
+                const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
+                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, selectedPatternIndex == i ? selected : section, TRUE);
                 DrawString(PanelContentX + 8, top + 5, pattern.name, text);
             }
             ++categoryRow;
@@ -419,8 +334,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (patternCount > PatternListScroll::VisibleRows) {
             const int firstVisible = scrollOffset + 1;
             const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
-            DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted,
-                             "%d-%d / %d", firstVisible, lastVisible, patternCount);
+            DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted, "%d-%d / %d", firstVisible, lastVisible, patternCount);
         }
 
         const int infoY = 650;
@@ -444,28 +358,18 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawFormatString(RotationValueX + 30, RotationY + 6, text, "R%d", patternRotation * 90);
         DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
 
-        DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING",
-                   paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        DrawString(PanelContentX, 966, "P/Shift+P select  Q/E rotate  G grid", muted);
-        DrawString(PanelContentX, 988, "Ctrl+S save  Ctrl+L load", muted);
+        DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
+        DrawString(PanelContentX, 966, "P select  Q/E rotate  Esc/RMB cancel", muted);
+        DrawString(PanelContentX, 988, "Ctrl+S save  Ctrl+L load  G grid", muted);
         ScreenFlip();
 
         ++fpsFrameCount;
         const auto fpsSampleEnd = Clock::now();
         const double fpsSampleSeconds = std::chrono::duration<double>(fpsSampleEnd - fpsSampleStart).count();
-        if (fpsSampleSeconds >= 0.5) {
-            fps = fpsFrameCount / fpsSampleSeconds;
-            fpsFrameCount = 0;
-            fpsSampleStart = fpsSampleEnd;
-        }
+        if (fpsSampleSeconds >= 0.5) { fps = fpsFrameCount / fpsSampleSeconds; fpsFrameCount = 0; fpsSampleStart = fpsSampleEnd; }
 
-        performanceLogger.record(
-            fps,
-            SimulationSpeeds[simulationSpeedIndex],
-            generation,
-            board.aliveCellCount(),
-            board.chunkCount(),
-            paused);
+        performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
+                                 board.aliveCellCount(), board.chunkCount(), paused);
 
         previousEnter = enter;
         previousSpace = space;
@@ -479,6 +383,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousSaveShortcut = saveShortcut;
         previousLoadShortcut = loadShortcut;
         previousLeft = left;
+        previousRight = right;
         previousMouseX = mouseX;
         previousMouseY = mouseY;
 
