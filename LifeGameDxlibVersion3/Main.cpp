@@ -327,7 +327,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const auto [sx, sy] = camera.boardToScreen(x, y);
             const int size = camera.cellSize();
             if (sx + size <= 0 || sy + size <= 0 || sx >= BoardViewWidth || sy >= ScreenHeight) return;
-            DrawBox(sx, sy, sx + size - 1, sy + size - 1, aliveColor, TRUE);
+            if (size == 1) {
+                DrawPixel(sx, sy, aliveColor);
+            } else {
+                DrawBox(sx, sy, sx + size - 1, sy + size - 1, aliveColor, TRUE);
+            }
         });
         if (showGrid) drawGrid(camera);
 
