@@ -1,6 +1,8 @@
 #include "DxLib.h"
+#include "FileDialog.h"
 #include "InfiniteCamera.h"
 #include "InfiniteLifeBoard.h"
+#include "InfiniteLifeFile.h"
 #include "PatternLibrary.h"
 #include "PatternListScroll.h"
 
@@ -8,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -134,6 +137,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousQ = false;
     bool previousE = false;
     bool previousG = false;
+    bool previousSaveShortcut = false;
+    bool previousLoadShortcut = false;
     bool previousLeft = false;
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
@@ -169,6 +174,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool q = CheckHitKey(KEY_INPUT_Q) != 0;
         const bool e = CheckHitKey(KEY_INPUT_E) != 0;
         const bool g = CheckHitKey(KEY_INPUT_G) != 0;
+        const bool ctrl = CheckHitKey(KEY_INPUT_LCONTROL) != 0 || CheckHitKey(KEY_INPUT_RCONTROL) != 0;
+        const bool saveShortcut = ctrl && CheckHitKey(KEY_INPUT_S) != 0;
+        const bool loadShortcut = ctrl && CheckHitKey(KEY_INPUT_L) != 0;
         const bool shift = CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
 
         if (enter && !previousEnter) {
@@ -182,6 +190,39 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             simulationAccumulator = 0.0;
         }
         if (g && !previousG) showGrid = !showGrid;
+
+        bool usedFileDialog = false;
+        if (saveShortcut && !previousSaveShortcut) {
+            std::string path;
+            if (FileDialog::chooseSavePath(path)) {
+                std::string errorMessage;
+                if (!InfiniteLifeFile::save(board, generation, path, errorMessage)) {
+                    FileDialog::showError(errorMessage);
+                }
+            }
+            usedFileDialog = true;
+        }
+        if (loadShortcut && !previousLoadShortcut) {
+            std::string path;
+            if (FileDialog::chooseLoadPath(path)) {
+                std::string errorMessage;
+                if (InfiniteLifeFile::load(board, generation, path, errorMessage)) {
+                    paused = true;
+                    simulationAccumulator = 0.0;
+                } else {
+                    FileDialog::showError(errorMessage);
+                }
+            }
+            usedFileDialog = true;
+        }
+        if (usedFileDialog) {
+            const auto resetTime = Clock::now();
+            previousFrameTime = resetTime;
+            nextFrameTime = resetTime;
+            fpsSampleStart = resetTime;
+            fpsFrameCount = 0;
+        }
+
         if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) {
             ++simulationSpeedIndex;
             simulationAccumulator = 0.0;
@@ -404,7 +445,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING",
                    paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
         DrawString(PanelContentX, 966, "P/Shift+P select  Q/E rotate  G grid", muted);
-        DrawString(PanelContentX, 988, "Wheel list / Click pattern", muted);
+        DrawString(PanelContentX, 988, "Ctrl+S save  Ctrl+L load", muted);
         ScreenFlip();
 
         ++fpsFrameCount;
@@ -425,6 +466,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousQ = q;
         previousE = e;
         previousG = g;
+        previousSaveShortcut = saveShortcut;
+        previousLoadShortcut = loadShortcut;
         previousLeft = left;
         previousMouseX = mouseX;
         previousMouseY = mouseY;
