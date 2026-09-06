@@ -45,6 +45,7 @@
     <ClInclude Include="InfiniteLifeFile.h" />
     <ClInclude Include="PatternLibrary.h" />
     <ClInclude Include="PatternListScroll.h" />
+    <ClInclude Include="PatternPlacementPreview.h" />
     <ClInclude Include="PerformanceLogger.h" />
     <ClInclude Include="RleParser.h" />
   </ItemGroup>
