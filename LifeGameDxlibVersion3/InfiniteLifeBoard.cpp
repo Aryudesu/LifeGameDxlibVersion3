@@ -104,27 +104,58 @@ void InfiniteLifeBoard::step() {
 
     constexpr Coord MinChunkCoord = std::numeric_limits<Coord>::min() / ChunkSize;
     constexpr Coord MaxChunkCoord = std::numeric_limits<Coord>::max() / ChunkSize;
+    constexpr std::uint64_t WestEdgeMask = 1ULL;
+    constexpr std::uint64_t EastEdgeMask = 1ULL << (ChunkSize - 1);
 
-    // A birth can only occur in a chunk that is already active or touches an
-    // active chunk. Build that sparse candidate set once per generation.
+    // A new live cell can only appear in a neighboring chunk when at least one
+    // live cell touches the corresponding boundary of the source chunk. This
+    // is much tighter than blindly expanding every active chunk to all 3x3
+    // neighbors, which is especially important for sparse moving patterns.
     std::unordered_set<ChunkCoord, ChunkCoordHash> candidates;
-    candidates.reserve(chunks_.size() * 4 + 16);
-    for (const auto& [coord, chunk] : chunks_) {
-        (void)chunk;
-        for (int dy = -1; dy <= 1; ++dy) {
-            if ((dy < 0 && coord.y == MinChunkCoord) ||
-                (dy > 0 && coord.y == MaxChunkCoord)) {
-                continue;
-            }
-            const Coord candidateY = coord.y + dy;
+    candidates.reserve(chunks_.size() * 2 + 16);
 
-            for (int dx = -1; dx <= 1; ++dx) {
-                if ((dx < 0 && coord.x == MinChunkCoord) ||
-                    (dx > 0 && coord.x == MaxChunkCoord)) {
-                    continue;
-                }
-                candidates.insert({coord.x + dx, candidateY});
-            }
+    const auto addCandidate = [&](Coord x, Coord y) {
+        if (x < MinChunkCoord || x > MaxChunkCoord ||
+            y < MinChunkCoord || y > MaxChunkCoord) {
+            return;
+        }
+        candidates.insert({x, y});
+    };
+
+    for (const auto& [coord, chunk] : chunks_) {
+        addCandidate(coord.x, coord.y);
+
+        bool touchesWest = false;
+        bool touchesEast = false;
+        for (const std::uint64_t row : chunk.rows) {
+            touchesWest = touchesWest || (row & WestEdgeMask) != 0;
+            touchesEast = touchesEast || (row & EastEdgeMask) != 0;
+            if (touchesWest && touchesEast) break;
+        }
+
+        const bool touchesNorth = chunk.rows.front() != 0;
+        const bool touchesSouth = chunk.rows.back() != 0;
+
+        if (touchesWest && coord.x > MinChunkCoord) addCandidate(coord.x - 1, coord.y);
+        if (touchesEast && coord.x < MaxChunkCoord) addCandidate(coord.x + 1, coord.y);
+        if (touchesNorth && coord.y > MinChunkCoord) addCandidate(coord.x, coord.y - 1);
+        if (touchesSouth && coord.y < MaxChunkCoord) addCandidate(coord.x, coord.y + 1);
+
+        if ((chunk.rows.front() & WestEdgeMask) != 0 &&
+            coord.x > MinChunkCoord && coord.y > MinChunkCoord) {
+            addCandidate(coord.x - 1, coord.y - 1);
+        }
+        if ((chunk.rows.front() & EastEdgeMask) != 0 &&
+            coord.x < MaxChunkCoord && coord.y > MinChunkCoord) {
+            addCandidate(coord.x + 1, coord.y - 1);
+        }
+        if ((chunk.rows.back() & WestEdgeMask) != 0 &&
+            coord.x > MinChunkCoord && coord.y < MaxChunkCoord) {
+            addCandidate(coord.x - 1, coord.y + 1);
+        }
+        if ((chunk.rows.back() & EastEdgeMask) != 0 &&
+            coord.x < MaxChunkCoord && coord.y < MaxChunkCoord) {
+            addCandidate(coord.x + 1, coord.y + 1);
         }
     }
 
@@ -143,6 +174,8 @@ void InfiniteLifeBoard::step() {
     std::uint64_t nextAliveCellCount = 0;
 
     for (const ChunkCoord& coord : candidates) {
+        // Resolve the 3x3 neighborhood once per candidate chunk. The 64 row
+        // updates below then use raw pointers rather than repeating hash lookups.
         const Chunk* neighborhood[3][3]{};
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dx = -1; dx <= 1; ++dx) {
