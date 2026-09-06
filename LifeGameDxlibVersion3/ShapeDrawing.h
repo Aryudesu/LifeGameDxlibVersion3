@@ -45,8 +45,10 @@ inline bool offsetCoord(Coord origin, std::uint64_t magnitude, bool positive, Co
     return true;
 }
 
+// Shape preview/commit can be evaluated after mouse state processing, so read the
+// physical Shift state directly instead of relying on DxLib's per-key polling here.
 inline bool shiftConstraintActive() noexcept {
-    return CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
+    return (::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 }
 
 // Shift: Line -> nearest 45-degree direction, Rectangle -> square.
@@ -75,7 +77,6 @@ inline std::pair<Coord, Coord> constrainedEnd(Tool tool, Coord x0, Coord y0, Coo
         } else if (fy >= fx * Tan67_5) {
             snappedX = 0;
         } else {
-            // Projection onto a 45-degree line: t = (|dx| + |dy|) / 2.
             const std::uint64_t diagonal = dx / 2 + dy / 2 + (((dx & 1U) + (dy & 1U)) >= 1U ? 1U : 0U);
             snappedX = diagonal;
             snappedY = diagonal;
