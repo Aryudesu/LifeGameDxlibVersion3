@@ -1,6 +1,8 @@
 #include "InfiniteLifeBoard.h"
 
 #include <bit>
+#include <limits>
+#include <unordered_set>
 #include <utility>
 
 namespace {
@@ -15,12 +17,6 @@ std::size_t mix64(std::uint64_t value) noexcept {
 }
 
 std::size_t InfiniteLifeBoard::ChunkCoordHash::operator()(const ChunkCoord& value) const noexcept {
-    const auto hx = mix64(static_cast<std::uint64_t>(value.x));
-    const auto hy = mix64(static_cast<std::uint64_t>(value.y));
-    return hx ^ (hy + 0x9e3779b97f4a7c15ULL + (hx << 6) + (hx >> 2));
-}
-
-std::size_t InfiniteLifeBoard::CellCoordHash::operator()(const CellCoord& value) const noexcept {
     const auto hx = mix64(static_cast<std::uint64_t>(value.x));
     const auto hy = mix64(static_cast<std::uint64_t>(value.y));
     return hx ^ (hy + 0x9e3779b97f4a7c15ULL + (hx << 6) + (hx >> 2));
@@ -104,25 +100,129 @@ void InfiniteLifeBoard::forEachAliveCell(const std::function<void(Coord, Coord)>
 }
 
 void InfiniteLifeBoard::step() {
-    std::unordered_map<CellCoord, std::uint8_t, CellCoordHash> neighborCounts;
-    neighborCounts.reserve(static_cast<std::size_t>(aliveCellCount_) * 6 + 32);
+    if (chunks_.empty()) return;
 
-    forEachAliveCell([&](Coord x, Coord y) {
+    constexpr Coord MinChunkCoord = std::numeric_limits<Coord>::min() / ChunkSize;
+    constexpr Coord MaxChunkCoord = std::numeric_limits<Coord>::max() / ChunkSize;
+
+    // A birth can only occur in a chunk that is already active or touches an
+    // active chunk. Build that sparse candidate set once per generation.
+    std::unordered_set<ChunkCoord, ChunkCoordHash> candidates;
+    candidates.reserve(chunks_.size() * 4 + 16);
+    for (const auto& [coord, chunk] : chunks_) {
+        (void)chunk;
         for (int dy = -1; dy <= 1; ++dy) {
+            if ((dy < 0 && coord.y == MinChunkCoord) ||
+                (dy > 0 && coord.y == MaxChunkCoord)) {
+                continue;
+            }
+            const Coord candidateY = coord.y + dy;
+
             for (int dx = -1; dx <= 1; ++dx) {
-                if (dx == 0 && dy == 0) continue;
-                ++neighborCounts[{x + dx, y + dy}];
+                if ((dx < 0 && coord.x == MinChunkCoord) ||
+                    (dx > 0 && coord.x == MaxChunkCoord)) {
+                    continue;
+                }
+                candidates.insert({coord.x + dx, candidateY});
             }
         }
-    });
+    }
 
     InfiniteLifeBoard next;
-    for (const auto& [cell, count] : neighborCounts) {
-        if (count == 3 || (count == 2 && isAlive(cell.x, cell.y))) {
-            next.setAlive(cell.x, cell.y, true);
+    next.chunks_.reserve(candidates.size());
+
+    const auto chunkAt = [&](Coord x, Coord y) -> const Chunk* {
+        if (x < MinChunkCoord || x > MaxChunkCoord ||
+            y < MinChunkCoord || y > MaxChunkCoord) {
+            return nullptr;
+        }
+        const auto it = chunks_.find({x, y});
+        return it == chunks_.end() ? nullptr : &it->second;
+    };
+
+    std::uint64_t nextAliveCellCount = 0;
+
+    for (const ChunkCoord& coord : candidates) {
+        const Chunk* neighborhood[3][3]{};
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                const bool xOutside =
+                    (dx < 0 && coord.x == MinChunkCoord) ||
+                    (dx > 0 && coord.x == MaxChunkCoord);
+                const bool yOutside =
+                    (dy < 0 && coord.y == MinChunkCoord) ||
+                    (dy > 0 && coord.y == MaxChunkCoord);
+                if (xOutside || yOutside) continue;
+                neighborhood[dy + 1][dx + 1] = chunkAt(coord.x + dx, coord.y + dy);
+            }
+        }
+
+        const auto rowFrom = [&](int horizontalChunkOffset, int row) noexcept -> std::uint64_t {
+            int verticalChunkOffset = 0;
+            int localRow = row;
+            if (row < 0) {
+                verticalChunkOffset = -1;
+                localRow += ChunkSize;
+            } else if (row >= ChunkSize) {
+                verticalChunkOffset = 1;
+                localRow -= ChunkSize;
+            }
+
+            const Chunk* source = neighborhood[verticalChunkOffset + 1][horizontalChunkOffset + 1];
+            return source == nullptr ? 0 : source->rows[localRow];
+        };
+
+        Chunk nextChunk;
+        for (int y = 0; y < ChunkSize; ++y) {
+            const std::uint64_t topWest = rowFrom(-1, y - 1);
+            const std::uint64_t top = rowFrom(0, y - 1);
+            const std::uint64_t topEast = rowFrom(1, y - 1);
+            const std::uint64_t middleWest = rowFrom(-1, y);
+            const std::uint64_t middle = rowFrom(0, y);
+            const std::uint64_t middleEast = rowFrom(1, y);
+            const std::uint64_t bottomWest = rowFrom(-1, y + 1);
+            const std::uint64_t bottom = rowFrom(0, y + 1);
+            const std::uint64_t bottomEast = rowFrom(1, y + 1);
+
+            const std::uint64_t neighborMasks[8] = {
+                (top << 1) | (topWest >> 63),
+                top,
+                (top >> 1) | ((topEast & 1ULL) << 63),
+                (middle << 1) | (middleWest >> 63),
+                (middle >> 1) | ((middleEast & 1ULL) << 63),
+                (bottom << 1) | (bottomWest >> 63),
+                bottom,
+                (bottom >> 1) | ((bottomEast & 1ULL) << 63)
+            };
+
+            // Bit-sliced addition: each bit position independently counts its
+            // eight neighbors without creating a hash entry per cell.
+            std::uint64_t ones = 0;
+            std::uint64_t twos = 0;
+            std::uint64_t fours = 0;
+            std::uint64_t eights = 0;
+            for (const std::uint64_t mask : neighborMasks) {
+                const std::uint64_t carryToTwos = ones & mask;
+                ones ^= mask;
+                const std::uint64_t carryToFours = twos & carryToTwos;
+                twos ^= carryToTwos;
+                const std::uint64_t carryToEights = fours & carryToFours;
+                fours ^= carryToFours;
+                eights ^= carryToEights;
+            }
+
+            const std::uint64_t exactlyTwo = ~eights & ~fours & twos & ~ones;
+            const std::uint64_t exactlyThree = ~eights & ~fours & twos & ones;
+            const std::uint64_t nextRow = exactlyThree | (middle & exactlyTwo);
+            nextChunk.rows[y] = nextRow;
+            nextAliveCellCount += static_cast<std::uint64_t>(std::popcount(nextRow));
+        }
+
+        if (!nextChunk.empty()) {
+            next.chunks_.emplace(coord, std::move(nextChunk));
         }
     }
 
     chunks_.swap(next.chunks_);
-    aliveCellCount_ = next.aliveCellCount_;
+    aliveCellCount_ = nextAliveCellCount;
 }
