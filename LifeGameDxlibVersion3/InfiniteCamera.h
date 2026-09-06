@@ -15,6 +15,8 @@ public:
     int cellSize() const noexcept { return cellSize_; }
 
     void move(Coord dx, Coord dy) noexcept { x_ += dx; y_ += dy; }
+    void panByPixels(int deltaScreenX, int deltaScreenY) noexcept;
+    void endPan() noexcept;
     bool zoomInAt(int screenX, int screenY, int maxCellSize) noexcept;
     bool zoomOutAt(int screenX, int screenY, int minCellSize) noexcept;
     std::pair<Coord, Coord> screenToBoard(int screenX, int screenY) const noexcept;
@@ -26,6 +28,8 @@ private:
     Coord x_ = 0;
     Coord y_ = 0;
     int cellSize_ = 1;
+    int panRemainderX_ = 0;
+    int panRemainderY_ = 0;
 
     bool zoomAt(int screenX, int screenY, int newCellSize) noexcept;
 };
