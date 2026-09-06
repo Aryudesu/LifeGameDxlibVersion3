@@ -1,0 +1,1 @@
+Edit history is intentionally limited to editing operations. Simulation steps, load, and clear invalidate the history because applying old cell deltas to a later generation would corrupt the board state.
