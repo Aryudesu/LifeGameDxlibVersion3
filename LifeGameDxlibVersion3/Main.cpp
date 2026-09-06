@@ -1,4 +1,5 @@
 #include "DxLib.h"
+#include "EditHistory.h"
 #include "FileDialog.h"
 #include "InfiniteCamera.h"
 #include "InfiniteLifeBoard.h"
@@ -91,6 +92,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     InfiniteCamera camera(BoardViewWidth, ScreenHeight, 8);
     PatternListScroll patternListScroll;
     PerformanceLogger performanceLogger;
+    EditHistory editHistory;
     seedGlider(board);
 
     bool paused = false;
@@ -106,8 +108,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousG = false;
     bool previousSaveShortcut = false;
     bool previousLoadShortcut = false;
+    bool previousUndoShortcut = false;
+    bool previousRedoShortcut = false;
     bool previousLeft = false;
     bool previousRight = false;
+    bool cellStrokeActive = false;
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
     std::size_t selectedPatternIndex = 0;
@@ -143,14 +148,27 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool g = CheckHitKey(KEY_INPUT_G) != 0;
         const bool escape = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
         const bool ctrl = CheckHitKey(KEY_INPUT_LCONTROL) != 0 || CheckHitKey(KEY_INPUT_RCONTROL) != 0;
+        const bool shift = CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
         const bool saveShortcut = ctrl && CheckHitKey(KEY_INPUT_S) != 0;
         const bool loadShortcut = ctrl && CheckHitKey(KEY_INPUT_L) != 0;
-        const bool shift = CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
+        const bool undoShortcut = ctrl && CheckHitKey(KEY_INPUT_Z) != 0 && !shift;
+        const bool redoShortcut = (ctrl && CheckHitKey(KEY_INPUT_Y) != 0) ||
+                                  (ctrl && shift && CheckHitKey(KEY_INPUT_Z) != 0);
 
         if (enter && !previousEnter) { paused = !paused; simulationAccumulator = 0.0; }
-        if (del && !previousDelete) { board.clear(); generation = 0; paused = true; simulationAccumulator = 0.0; }
+        if (del && !previousDelete) {
+            board.clear();
+            editHistory.clear();
+            cellStrokeActive = false;
+            generation = 0;
+            paused = true;
+            simulationAccumulator = 0.0;
+        }
         if (g && !previousG) showGrid = !showGrid;
         if (escape && selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
+
+        if (paused && undoShortcut && !previousUndoShortcut && !cellStrokeActive) editHistory.undo(board);
+        if (paused && redoShortcut && !previousRedoShortcut && !cellStrokeActive) editHistory.redo(board);
 
         bool usedFileDialog = false;
         if (saveShortcut && !previousSaveShortcut) {
@@ -166,6 +184,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (FileDialog::chooseLoadPath(path)) {
                 std::string errorMessage;
                 if (InfiniteLifeFile::load(board, generation, path, errorMessage)) {
+                    editHistory.clear();
+                    cellStrokeActive = false;
                     paused = true;
                     simulationAccumulator = 0.0;
                 } else FileDialog::showError(errorMessage);
@@ -263,23 +283,58 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (paused && !middle) {
                 const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
                 if (selectedPatternIndex == 0) {
-                    if (left || right) board.setAlive(x, y, left && !right);
+                    if ((leftPressed || rightPressed) && (left || right) && !cellStrokeActive) {
+                        editHistory.begin();
+                        cellStrokeActive = true;
+                    }
+                    if (cellStrokeActive && (left || right)) {
+                        editHistory.setAlive(board, x, y, left && !right);
+                    }
                 } else {
                     const LifePattern& pattern = PatternLibrary::at(selectedPatternIndex);
-                    if (rightPressed) { selectedPatternIndex = 0; patternRotation = 0; }
-                    else if (leftPressed) PatternPlacementPreview::place(board, pattern, x, y, patternRotation);
+                    if (rightPressed) {
+                        selectedPatternIndex = 0;
+                        patternRotation = 0;
+                    } else if (leftPressed && PatternPlacementPreview::canPlace(pattern, x, y, patternRotation)) {
+                        editHistory.begin();
+                        const auto [offsetX, offsetY] = PatternPlacementPreview::rotationOffset(pattern, patternRotation);
+                        for (const PatternCell cell : pattern.cells) {
+                            const auto [rx, ry] = PatternPlacementPreview::rotatedCell(cell, patternRotation);
+                            InfiniteLifeBoard::Coord targetX = 0;
+                            InfiniteLifeBoard::Coord targetY = 0;
+                            if (PatternPlacementPreview::checkedAdd(x, rx + offsetX, targetX) &&
+                                PatternPlacementPreview::checkedAdd(y, ry + offsetY, targetY)) {
+                                editHistory.setAlive(board, targetX, targetY, true);
+                            }
+                        }
+                        editHistory.commit();
+                    }
                 }
             }
         } else camera.endPan();
 
+        if (cellStrokeActive && !left && !right) {
+            editHistory.commit();
+            cellStrokeActive = false;
+        }
+
         if (paused) {
             simulationAccumulator = 0.0;
-            if (space && !previousSpace) { board.step(); ++generation; }
+            if (space && !previousSpace) {
+                editHistory.clear();
+                cellStrokeActive = false;
+                board.step();
+                ++generation;
+            }
         } else {
             const double simulationSeconds = std::min(elapsedSeconds, MaxSimulationDeltaSeconds);
             simulationAccumulator += simulationSeconds * SimulationSpeeds[simulationSpeedIndex];
             const int generationsToAdvance = static_cast<int>(simulationAccumulator);
             simulationAccumulator -= generationsToAdvance;
+            if (generationsToAdvance > 0) {
+                editHistory.clear();
+                cellStrokeActive = false;
+            }
             for (int i = 0; i < generationsToAdvance; ++i) { board.step(); ++generation; }
         }
 
@@ -337,7 +392,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted, "%d-%d / %d", firstVisible, lastVisible, patternCount);
         }
 
-        const int infoY = 650;
+        const int infoY = 626;
         DrawString(PanelContentX, infoY, "STATUS", muted);
         DrawFormatString(PanelContentX, infoY + 26, text, "Generation  %llu", static_cast<unsigned long long>(generation));
         DrawFormatString(PanelContentX, infoY + 50, text, "FPS         %.1f", fps);
@@ -347,6 +402,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawFormatString(PanelContentX, infoY + 146, text, "Camera      (%lld, %lld)", static_cast<long long>(camera.x()), static_cast<long long>(camera.y()));
         DrawFormatString(PanelContentX, infoY + 170, text, "Zoom        %d", camera.cellSize());
         DrawFormatString(PanelContentX, infoY + 194, text, "Grid        %s", showGrid ? "ON" : "OFF");
+        DrawFormatString(PanelContentX, infoY + 218, text, "Undo/Redo   %llu / %llu",
+                         static_cast<unsigned long long>(editHistory.undoCount()),
+                         static_cast<unsigned long long>(editHistory.redoCount()));
 
         DrawString(PanelContentX, 876, "ROTATION", muted);
         const bool rotationEnabled = selectedPatternIndex != 0;
@@ -359,8 +417,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
 
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        DrawString(PanelContentX, 966, "P select  Q/E rotate  Esc/RMB cancel", muted);
-        DrawString(PanelContentX, 988, "Ctrl+S save  Ctrl+L load  G grid", muted);
+        DrawString(PanelContentX, 966, "P select Q/E rotate Esc/RMB cancel", muted);
+        DrawString(PanelContentX, 988, "Ctrl+Z/Y undo/redo  Ctrl+S/L save/load", muted);
         ScreenFlip();
 
         ++fpsFrameCount;
@@ -382,6 +440,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousG = g;
         previousSaveShortcut = saveShortcut;
         previousLoadShortcut = loadShortcut;
+        previousUndoShortcut = undoShortcut;
+        previousRedoShortcut = redoShortcut;
         previousLeft = left;
         previousRight = right;
         previousMouseX = mouseX;
