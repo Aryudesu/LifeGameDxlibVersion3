@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 namespace ShapeDrawing {
 
@@ -34,6 +35,66 @@ inline std::uint64_t distance(Coord a, Coord b) noexcept {
     const auto ua = static_cast<std::uint64_t>(a);
     const auto ub = static_cast<std::uint64_t>(b);
     return a >= b ? ua - ub : ub - ua;
+}
+
+inline bool offsetCoord(Coord origin, std::uint64_t magnitude, bool positive, Coord& result) noexcept {
+    if (magnitude > static_cast<std::uint64_t>(std::numeric_limits<Coord>::max())) return false;
+    const Coord delta = static_cast<Coord>(magnitude);
+    if (positive) {
+        if (origin > std::numeric_limits<Coord>::max() - delta) return false;
+        result = origin + delta;
+    } else {
+        if (origin < std::numeric_limits<Coord>::min() + delta) return false;
+        result = origin - delta;
+    }
+    return true;
+}
+
+// Shift constraint used by the interactive shape tools.
+// Line snaps to the nearest multiple of 45 degrees. Rectangle becomes a square.
+// Circle is already constrained by definition, so its endpoint is unchanged.
+inline std::pair<Coord, Coord> constrainedEnd(Tool tool,
+                                               Coord x0, Coord y0,
+                                               Coord x1, Coord y1,
+                                               bool constrain) noexcept {
+    if (!constrain || (tool != Tool::Line && tool != Tool::Rectangle)) return {x1, y1};
+
+    const std::uint64_t dx = distance(x0, x1);
+    const std::uint64_t dy = distance(y0, y1);
+    const bool positiveX = x1 >= x0;
+    const bool positiveY = y1 >= y0;
+
+    std::uint64_t snappedX = dx;
+    std::uint64_t snappedY = dy;
+
+    if (tool == Tool::Rectangle) {
+        // Use the larger drag component so the square continues to reach the pointer's extent.
+        const std::uint64_t side = std::max(dx, dy);
+        snappedX = side;
+        snappedY = side;
+    } else {
+        // tan(22.5 deg) ~= 0.4142 and tan(67.5 deg) ~= 2.4142.
+        // Long double keeps the comparison safe even near the int64 coordinate limits.
+        const long double fx = static_cast<long double>(dx);
+        const long double fy = static_cast<long double>(dy);
+        constexpr long double Tan22_5 = 0.4142135623730950488L;
+        constexpr long double Tan67_5 = 2.4142135623730950488L;
+        if (fy <= fx * Tan22_5) {
+            snappedY = 0;
+        } else if (fy >= fx * Tan67_5) {
+            snappedX = 0;
+        } else {
+            const std::uint64_t diagonal = (dx / 2) + (dy / 2) + ((dx & 1U) && (dy & 1U) ? 1U : 0U);
+            snappedX = diagonal;
+            snappedY = diagonal;
+        }
+    }
+
+    Coord resultX = x1;
+    Coord resultY = y1;
+    if (!offsetCoord(x0, snappedX, positiveX, resultX) ||
+        !offsetCoord(y0, snappedY, positiveY, resultY)) return {x1, y1};
+    return {resultX, resultY};
 }
 
 template <typename Visitor>
