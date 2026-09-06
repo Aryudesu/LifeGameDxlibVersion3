@@ -614,6 +614,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
         DrawString(PanelContentX, 966, hoverHelp != nullptr ? hoverHelp : "Shape: drag LMB add / RMB erase", muted);
         DrawString(PanelContentX, 988, "Shortcuts: Ctrl+Z/Y/S/L, P, Q/E, G", muted);
+        if (hoverHelp != nullptr) ToolbarIcons::drawTooltip(mouseX, mouseY, hoverHelp, WindowWidth, ScreenHeight);
         ScreenFlip();
 
         ++fpsFrameCount;
