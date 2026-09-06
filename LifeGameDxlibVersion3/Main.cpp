@@ -5,6 +5,7 @@
 #include "InfiniteLifeFile.h"
 #include "PatternLibrary.h"
 #include "PatternListScroll.h"
+#include "PerformanceLogger.h"
 
 #include <algorithm>
 #include <array>
@@ -124,6 +125,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     InfiniteLifeBoard board;
     InfiniteCamera camera(BoardViewWidth, ScreenHeight, 8);
     PatternListScroll patternListScroll;
+    PerformanceLogger performanceLogger;
     seedGlider(board);
 
     bool paused = false;
@@ -456,6 +458,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             fpsFrameCount = 0;
             fpsSampleStart = fpsSampleEnd;
         }
+
+        performanceLogger.record(
+            fps,
+            SimulationSpeeds[simulationSpeedIndex],
+            generation,
+            board.aliveCellCount(),
+            board.chunkCount(),
+            paused);
 
         previousEnter = enter;
         previousSpace = space;
