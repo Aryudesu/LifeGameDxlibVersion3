@@ -25,6 +25,7 @@ constexpr int MinCellSize = 1;
 constexpr int MaxCellSize = 32;
 constexpr double TargetFps = 60.0;
 constexpr double MaxSimulationDeltaSeconds = 0.25;
+constexpr std::uint64_t MaxInterpolatedStrokeSpan = 4096;
 constexpr std::array SimulationSpeeds = {1, 5, 10, 30, 60, 120, 300, 600};
 constexpr std::size_t DefaultSimulationSpeedIndex = 4;
 
@@ -76,6 +77,50 @@ void drawGrid(const InfiniteCamera& camera) {
     for (int x = 0; x <= BoardViewWidth; x += cellSize) DrawLine(x, 0, x, ScreenHeight, gridColor);
     for (int y = 0; y <= ScreenHeight; y += cellSize) DrawLine(0, y, BoardViewWidth, y, gridColor);
 }
+
+std::uint64_t coordDistance(InfiniteLifeBoard::Coord a, InfiniteLifeBoard::Coord b) noexcept {
+    const auto ua = static_cast<std::uint64_t>(a);
+    const auto ub = static_cast<std::uint64_t>(b);
+    return a >= b ? ua - ub : ub - ua;
+}
+
+template <typename Visitor>
+void visitInterpolatedCells(InfiniteLifeBoard::Coord x0,
+                            InfiniteLifeBoard::Coord y0,
+                            InfiniteLifeBoard::Coord x1,
+                            InfiniteLifeBoard::Coord y1,
+                            Visitor&& visitor) {
+    const std::uint64_t spanX = coordDistance(x0, x1);
+    const std::uint64_t spanY = coordDistance(y0, y1);
+
+    // A normal mouse move inside the 1024x1024 board can never require this many cells.
+    // If the camera jumps discontinuously, avoid an accidental enormous edit and restart at the current cell.
+    if (std::max(spanX, spanY) > MaxInterpolatedStrokeSpan) {
+        visitor(x1, y1);
+        return;
+    }
+
+    const std::int64_t dx = static_cast<std::int64_t>(spanX);
+    const std::int64_t dy = -static_cast<std::int64_t>(spanY);
+    const int stepX = x0 < x1 ? 1 : -1;
+    const int stepY = y0 < y1 ? 1 : -1;
+    std::int64_t error = dx + dy;
+
+    for (;;) {
+        visitor(x0, y0);
+        if (x0 == x1 && y0 == y1) break;
+
+        const std::int64_t twiceError = error * 2;
+        if (twiceError >= dy) {
+            error += dy;
+            x0 += stepX;
+        }
+        if (twiceError <= dx) {
+            error += dx;
+            y0 += stepY;
+        }
+    }
+}
 } // namespace
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
@@ -113,6 +158,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousLeft = false;
     bool previousRight = false;
     bool cellStrokeActive = false;
+    bool cellStrokeHasLastCell = false;
+    InfiniteLifeBoard::Coord lastCellStrokeX = 0;
+    InfiniteLifeBoard::Coord lastCellStrokeY = 0;
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
     std::size_t selectedPatternIndex = 0;
@@ -160,6 +208,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             board.clear();
             editHistory.clear();
             cellStrokeActive = false;
+            cellStrokeHasLastCell = false;
             generation = 0;
             paused = true;
             simulationAccumulator = 0.0;
@@ -186,6 +235,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 if (InfiniteLifeFile::load(board, generation, path, errorMessage)) {
                     editHistory.clear();
                     cellStrokeActive = false;
+                    cellStrokeHasLastCell = false;
                     paused = true;
                     simulationAccumulator = 0.0;
                 } else FileDialog::showError(errorMessage);
@@ -280,17 +330,32 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (wheel > 0) for (int i = 0; i < wheel; ++i) { if (!camera.zoomInAt(mouseX, mouseY, MaxCellSize)) break; }
             else if (wheel < 0) for (int i = 0; i < -wheel; ++i) { if (!camera.zoomOutAt(mouseX, mouseY, MinCellSize)) break; }
 
+            if (middle || wheel != 0) cellStrokeHasLastCell = false;
+
             if (paused && !middle) {
                 const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
                 if (selectedPatternIndex == 0) {
                     if ((leftPressed || rightPressed) && (left || right) && !cellStrokeActive) {
                         editHistory.begin();
                         cellStrokeActive = true;
+                        cellStrokeHasLastCell = false;
                     }
                     if (cellStrokeActive && (left || right)) {
-                        editHistory.setAlive(board, x, y, left && !right);
+                        const bool alive = left && !right;
+                        if (cellStrokeHasLastCell) {
+                            visitInterpolatedCells(lastCellStrokeX, lastCellStrokeY, x, y,
+                                [&](InfiniteLifeBoard::Coord cellX, InfiniteLifeBoard::Coord cellY) {
+                                    editHistory.setAlive(board, cellX, cellY, alive);
+                                });
+                        } else {
+                            editHistory.setAlive(board, x, y, alive);
+                        }
+                        lastCellStrokeX = x;
+                        lastCellStrokeY = y;
+                        cellStrokeHasLastCell = true;
                     }
                 } else {
+                    cellStrokeHasLastCell = false;
                     const LifePattern& pattern = PatternLibrary::at(selectedPatternIndex);
                     if (rightPressed) {
                         selectedPatternIndex = 0;
@@ -311,11 +376,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     }
                 }
             }
-        } else camera.endPan();
+        } else {
+            camera.endPan();
+            cellStrokeHasLastCell = false;
+        }
 
         if (cellStrokeActive && !left && !right) {
             editHistory.commit();
             cellStrokeActive = false;
+            cellStrokeHasLastCell = false;
         }
 
         if (paused) {
@@ -323,6 +392,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (space && !previousSpace) {
                 editHistory.clear();
                 cellStrokeActive = false;
+                cellStrokeHasLastCell = false;
                 board.step();
                 ++generation;
             }
@@ -334,6 +404,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (generationsToAdvance > 0) {
                 editHistory.clear();
                 cellStrokeActive = false;
+                cellStrokeHasLastCell = false;
             }
             for (int i = 0; i < generationsToAdvance; ++i) { board.step(); ++generation; }
         }
