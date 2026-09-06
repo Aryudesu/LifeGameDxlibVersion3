@@ -8,6 +8,7 @@
 #include "PatternListScroll.h"
 #include "PatternPlacementPreview.h"
 #include "PerformanceLogger.h"
+#include "ShapeDrawing.h"
 
 #include <algorithm>
 #include <array>
@@ -25,13 +26,16 @@ constexpr int MinCellSize = 1;
 constexpr int MaxCellSize = 32;
 constexpr double TargetFps = 60.0;
 constexpr double MaxSimulationDeltaSeconds = 0.25;
-constexpr std::uint64_t MaxInterpolatedStrokeSpan = 4096;
 constexpr std::array SimulationSpeeds = {1, 5, 10, 30, 60, 120, 300, 600};
 constexpr std::size_t DefaultSimulationSpeedIndex = 4;
 
 constexpr int PanelX = BoardViewWidth;
 constexpr int PanelPadding = 16;
 constexpr int PanelContentX = PanelX + PanelPadding;
+constexpr int ToolButtonY = 42;
+constexpr int ToolButtonWidth = 66;
+constexpr int ToolButtonHeight = 30;
+constexpr int ToolButtonGap = 8;
 constexpr int PatternListY = 198;
 constexpr int PatternRowHeight = 28;
 constexpr int PatternListBottom = PatternListY + PatternListScroll::VisibleRows * PatternRowHeight;
@@ -43,6 +47,14 @@ constexpr int RotationLeftX = PanelContentX;
 constexpr int RotationValueX = RotationLeftX + RotationButtonWidth + RotationGap;
 constexpr int RotationRightX = RotationValueX + RotationValueWidth + RotationGap;
 constexpr int RotationHeight = 30;
+
+constexpr std::array ShapeTools = {
+    ShapeDrawing::Tool::Cell,
+    ShapeDrawing::Tool::Line,
+    ShapeDrawing::Tool::Rectangle,
+    ShapeDrawing::Tool::Circle
+};
+
 constexpr std::array ToolCategories = {
     PatternCategory::StillLife,
     PatternCategory::Oscillator,
@@ -76,50 +88,6 @@ void drawGrid(const InfiniteCamera& camera) {
     const unsigned int gridColor = GetColor(45, 45, 45);
     for (int x = 0; x <= BoardViewWidth; x += cellSize) DrawLine(x, 0, x, ScreenHeight, gridColor);
     for (int y = 0; y <= ScreenHeight; y += cellSize) DrawLine(0, y, BoardViewWidth, y, gridColor);
-}
-
-std::uint64_t coordDistance(InfiniteLifeBoard::Coord a, InfiniteLifeBoard::Coord b) noexcept {
-    const auto ua = static_cast<std::uint64_t>(a);
-    const auto ub = static_cast<std::uint64_t>(b);
-    return a >= b ? ua - ub : ub - ua;
-}
-
-template <typename Visitor>
-void visitInterpolatedCells(InfiniteLifeBoard::Coord x0,
-                            InfiniteLifeBoard::Coord y0,
-                            InfiniteLifeBoard::Coord x1,
-                            InfiniteLifeBoard::Coord y1,
-                            Visitor&& visitor) {
-    const std::uint64_t spanX = coordDistance(x0, x1);
-    const std::uint64_t spanY = coordDistance(y0, y1);
-
-    // A normal mouse move inside the 1024x1024 board can never require this many cells.
-    // If the camera jumps discontinuously, avoid an accidental enormous edit and restart at the current cell.
-    if (std::max(spanX, spanY) > MaxInterpolatedStrokeSpan) {
-        visitor(x1, y1);
-        return;
-    }
-
-    const std::int64_t dx = static_cast<std::int64_t>(spanX);
-    const std::int64_t dy = -static_cast<std::int64_t>(spanY);
-    const int stepX = x0 < x1 ? 1 : -1;
-    const int stepY = y0 < y1 ? 1 : -1;
-    std::int64_t error = dx + dy;
-
-    for (;;) {
-        visitor(x0, y0);
-        if (x0 == x1 && y0 == y1) break;
-
-        const std::int64_t twiceError = error * 2;
-        if (twiceError >= dy) {
-            error += dy;
-            x0 += stepX;
-        }
-        if (twiceError <= dx) {
-            error += dx;
-            y0 += stepY;
-        }
-    }
 }
 } // namespace
 
@@ -157,10 +125,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousRedoShortcut = false;
     bool previousLeft = false;
     bool previousRight = false;
+
     bool cellStrokeActive = false;
     bool cellStrokeHasLastCell = false;
     InfiniteLifeBoard::Coord lastCellStrokeX = 0;
     InfiniteLifeBoard::Coord lastCellStrokeY = 0;
+
+    ShapeDrawing::Tool shapeTool = ShapeDrawing::Tool::Cell;
+    bool shapeDragActive = false;
+    bool shapeErase = false;
+    InfiniteLifeBoard::Coord shapeStartX = 0;
+    InfiniteLifeBoard::Coord shapeStartY = 0;
+    InfiniteLifeBoard::Coord shapeEndX = 0;
+    InfiniteLifeBoard::Coord shapeEndY = 0;
+
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
     std::size_t selectedPatternIndex = 0;
@@ -203,21 +181,29 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool redoShortcut = (ctrl && CheckHitKey(KEY_INPUT_Y) != 0) ||
                                   (ctrl && shift && CheckHitKey(KEY_INPUT_Z) != 0);
 
-        if (enter && !previousEnter) { paused = !paused; simulationAccumulator = 0.0; }
+        if (enter && !previousEnter) {
+            paused = !paused;
+            simulationAccumulator = 0.0;
+            shapeDragActive = false;
+        }
         if (del && !previousDelete) {
             board.clear();
             editHistory.clear();
             cellStrokeActive = false;
             cellStrokeHasLastCell = false;
+            shapeDragActive = false;
             generation = 0;
             paused = true;
             simulationAccumulator = 0.0;
         }
         if (g && !previousG) showGrid = !showGrid;
-        if (escape && selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
+        if (escape) {
+            if (selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
+            shapeDragActive = false;
+        }
 
-        if (paused && undoShortcut && !previousUndoShortcut && !cellStrokeActive) editHistory.undo(board);
-        if (paused && redoShortcut && !previousRedoShortcut && !cellStrokeActive) editHistory.redo(board);
+        if (paused && undoShortcut && !previousUndoShortcut && !cellStrokeActive && !shapeDragActive) editHistory.undo(board);
+        if (paused && redoShortcut && !previousRedoShortcut && !cellStrokeActive && !shapeDragActive) editHistory.redo(board);
 
         bool usedFileDialog = false;
         if (saveShortcut && !previousSaveShortcut) {
@@ -236,6 +222,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     editHistory.clear();
                     cellStrokeActive = false;
                     cellStrokeHasLastCell = false;
+                    shapeDragActive = false;
                     paused = true;
                     simulationAccumulator = 0.0;
                 } else FileDialog::showError(errorMessage);
@@ -253,6 +240,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) { ++simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (pageDown && !previousPageDown && simulationSpeedIndex > 0) { --simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (p && !previousP) {
+            shapeTool = ShapeDrawing::Tool::Cell;
+            shapeDragActive = false;
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
             else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
             patternRotation = 0;
@@ -279,49 +268,68 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool middle = (mouseInput & MOUSE_INPUT_MIDDLE) != 0;
         const bool leftPressed = left && !previousLeft;
         const bool rightPressed = right && !previousRight;
+        const bool leftReleased = !left && previousLeft;
+        const bool rightReleased = !right && previousRight;
         const int wheel = GetMouseWheelRotVol();
         const bool mouseOnBoard = mouseX >= 0 && mouseX < BoardViewWidth && mouseY >= 0 && mouseY < ScreenHeight;
         const bool mouseOnPanel = mouseX >= PanelX && mouseX < WindowWidth && mouseY >= 0 && mouseY < ScreenHeight;
 
-        if (mouseOnPanel && inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) patternListScroll.scroll(toolCategory, wheel);
+        if (mouseOnPanel && inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) {
+            patternListScroll.scroll(toolCategory, wheel);
+        }
 
         if (mouseOnPanel && leftPressed) {
-            if (inRect(mouseX, mouseY, PanelContentX, 42, WindowWidth - PanelPadding, 72)) {
-                selectedPatternIndex = 0;
-                patternRotation = 0;
-            } else {
-                bool handled = false;
-                for (std::size_t i = 0; i < ToolCategories.size() && !handled; ++i) {
-                    const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
-                    const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
-                    if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
-                        toolCategory = ToolCategories[i];
-                        selectedPatternIndex = firstPatternInCategory(toolCategory);
-                        patternRotation = 0;
-                        patternListScroll.ensurePatternVisible(selectedPatternIndex);
-                        handled = true;
-                    }
+            bool handled = false;
+            for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
+                const int leftX = PanelContentX + static_cast<int>(i) * (ToolButtonWidth + ToolButtonGap);
+                if (inRect(mouseX, mouseY, leftX, ToolButtonY, leftX + ToolButtonWidth, ToolButtonY + ToolButtonHeight)) {
+                    shapeTool = ShapeTools[i];
+                    selectedPatternIndex = 0;
+                    patternRotation = 0;
+                    shapeDragActive = false;
+                    cellStrokeHasLastCell = false;
+                    handled = true;
+                    break;
                 }
-                if (!handled) {
-                    const int scrollOffset = patternListScroll.offset(toolCategory);
-                    int categoryRow = 0;
-                    for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
-                        const LifePattern& pattern = PatternLibrary::at(i);
-                        if (pattern.category != toolCategory) continue;
-                        if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
-                            const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
-                            if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
-                                selectedPatternIndex = i; patternRotation = 0; handled = true; break;
-                            }
+            }
+
+            for (std::size_t i = 0; i < ToolCategories.size() && !handled; ++i) {
+                const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
+                const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
+                if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
+                    shapeTool = ShapeDrawing::Tool::Cell;
+                    toolCategory = ToolCategories[i];
+                    selectedPatternIndex = firstPatternInCategory(toolCategory);
+                    patternRotation = 0;
+                    patternListScroll.ensurePatternVisible(selectedPatternIndex);
+                    handled = true;
+                }
+            }
+
+            if (!handled) {
+                const int scrollOffset = patternListScroll.offset(toolCategory);
+                int categoryRow = 0;
+                for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
+                    const LifePattern& pattern = PatternLibrary::at(i);
+                    if (pattern.category != toolCategory) continue;
+                    if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
+                        const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
+                        if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
+                            shapeTool = ShapeDrawing::Tool::Cell;
+                            selectedPatternIndex = i;
+                            patternRotation = 0;
+                            handled = true;
+                            break;
                         }
-                        ++categoryRow;
                     }
+                    ++categoryRow;
                 }
-                if (!handled && selectedPatternIndex != 0) {
-                    if (inRect(mouseX, mouseY, RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 3) & 3;
-                    else if (inRect(mouseX, mouseY, RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight)) patternRotation = 0;
-                    else if (inRect(mouseX, mouseY, RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 1) & 3;
-                }
+            }
+
+            if (!handled && selectedPatternIndex != 0) {
+                if (inRect(mouseX, mouseY, RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 3) & 3;
+                else if (inRect(mouseX, mouseY, RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight)) patternRotation = 0;
+                else if (inRect(mouseX, mouseY, RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 1) & 3;
             }
         }
 
@@ -330,32 +338,49 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (wheel > 0) for (int i = 0; i < wheel; ++i) { if (!camera.zoomInAt(mouseX, mouseY, MaxCellSize)) break; }
             else if (wheel < 0) for (int i = 0; i < -wheel; ++i) { if (!camera.zoomOutAt(mouseX, mouseY, MinCellSize)) break; }
 
-            if (middle || wheel != 0) cellStrokeHasLastCell = false;
+            if (middle || wheel != 0) {
+                cellStrokeHasLastCell = false;
+                shapeDragActive = false;
+            }
 
             if (paused && !middle) {
                 const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
                 if (selectedPatternIndex == 0) {
-                    if ((leftPressed || rightPressed) && (left || right) && !cellStrokeActive) {
-                        editHistory.begin();
-                        cellStrokeActive = true;
-                        cellStrokeHasLastCell = false;
-                    }
-                    if (cellStrokeActive && (left || right)) {
-                        const bool alive = left && !right;
-                        if (cellStrokeHasLastCell) {
-                            visitInterpolatedCells(lastCellStrokeX, lastCellStrokeY, x, y,
-                                [&](InfiniteLifeBoard::Coord cellX, InfiniteLifeBoard::Coord cellY) {
-                                    editHistory.setAlive(board, cellX, cellY, alive);
-                                });
-                        } else {
-                            editHistory.setAlive(board, x, y, alive);
+                    if (shapeTool == ShapeDrawing::Tool::Cell) {
+                        if ((leftPressed || rightPressed) && (left || right) && !cellStrokeActive) {
+                            editHistory.begin();
+                            cellStrokeActive = true;
+                            cellStrokeHasLastCell = false;
                         }
-                        lastCellStrokeX = x;
-                        lastCellStrokeY = y;
-                        cellStrokeHasLastCell = true;
+                        if (cellStrokeActive && (left || right)) {
+                            const bool alive = left && !right;
+                            if (cellStrokeHasLastCell) {
+                                ShapeDrawing::visitLine(lastCellStrokeX, lastCellStrokeY, x, y,
+                                    [&](InfiniteLifeBoard::Coord cellX, InfiniteLifeBoard::Coord cellY) {
+                                        editHistory.setAlive(board, cellX, cellY, alive);
+                                    }, 4096);
+                            } else {
+                                editHistory.setAlive(board, x, y, alive);
+                            }
+                            lastCellStrokeX = x;
+                            lastCellStrokeY = y;
+                            cellStrokeHasLastCell = true;
+                        }
+                    } else {
+                        if ((leftPressed || rightPressed) && !shapeDragActive) {
+                            shapeStartX = shapeEndX = x;
+                            shapeStartY = shapeEndY = y;
+                            shapeErase = rightPressed;
+                            shapeDragActive = true;
+                        }
+                        if (shapeDragActive && (left || right)) {
+                            shapeEndX = x;
+                            shapeEndY = y;
+                        }
                     }
                 } else {
                     cellStrokeHasLastCell = false;
+                    shapeDragActive = false;
                     const LifePattern& pattern = PatternLibrary::at(selectedPatternIndex);
                     if (rightPressed) {
                         selectedPatternIndex = 0;
@@ -387,12 +412,24 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             cellStrokeHasLastCell = false;
         }
 
+        if (shapeDragActive && ((shapeErase && rightReleased) || (!shapeErase && leftReleased))) {
+            editHistory.begin();
+            const bool valid = ShapeDrawing::visitShape(shapeTool, shapeStartX, shapeStartY, shapeEndX, shapeEndY,
+                [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+                    editHistory.setAlive(board, x, y, !shapeErase);
+                });
+            if (valid) editHistory.commit();
+            else editHistory.discardActive();
+            shapeDragActive = false;
+        }
+
         if (paused) {
             simulationAccumulator = 0.0;
             if (space && !previousSpace) {
                 editHistory.clear();
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
+                shapeDragActive = false;
                 board.step();
                 ++generation;
             }
@@ -405,6 +442,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 editHistory.clear();
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
+                shapeDragActive = false;
             }
             for (int i = 0; i < generationsToAdvance; ++i) { board.step(); ++generation; }
         }
@@ -420,6 +458,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         });
         if (showGrid) drawGrid(camera);
 
+        if (paused && shapeDragActive && selectedPatternIndex == 0 && shapeTool != ShapeDrawing::Tool::Cell) {
+            ShapeDrawing::drawPreview(shapeTool, camera, shapeStartX, shapeStartY, shapeEndX, shapeEndY,
+                                      BoardViewWidth, ScreenHeight, shapeErase);
+        }
+
         if (paused && mouseOnBoard && !middle && selectedPatternIndex != 0) {
             const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
             PatternPlacementPreview::draw(camera, PatternLibrary::at(selectedPatternIndex), previewX, previewY,
@@ -433,8 +476,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const unsigned int muted = GetColor(170, 175, 180);
         DrawBox(PanelX, 0, WindowWidth, ScreenHeight, background, TRUE);
         DrawString(PanelContentX, 14, "LIFE GAME TOOLS", text);
-        DrawBox(PanelContentX, 42, WindowWidth - PanelPadding, 72, selectedPatternIndex == 0 ? selected : section, TRUE);
-        DrawString(PanelContentX + 10, 49, "Cell", text);
+
+        for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
+            const int leftX = PanelContentX + static_cast<int>(i) * (ToolButtonWidth + ToolButtonGap);
+            const bool isSelected = selectedPatternIndex == 0 && shapeTool == ShapeTools[i];
+            DrawBox(leftX, ToolButtonY, leftX + ToolButtonWidth, ToolButtonY + ToolButtonHeight,
+                    isSelected ? selected : section, TRUE);
+            DrawString(leftX + 7, ToolButtonY + 7, ShapeDrawing::toolName(ShapeTools[i]), text);
+        }
 
         for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
             const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
@@ -463,7 +512,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted, "%d-%d / %d", firstVisible, lastVisible, patternCount);
         }
 
-        const int infoY = 626;
+        const int infoY = 602;
         DrawString(PanelContentX, infoY, "STATUS", muted);
         DrawFormatString(PanelContentX, infoY + 26, text, "Generation  %llu", static_cast<unsigned long long>(generation));
         DrawFormatString(PanelContentX, infoY + 50, text, "FPS         %.1f", fps);
@@ -476,6 +525,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawFormatString(PanelContentX, infoY + 218, text, "Undo/Redo   %llu / %llu",
                          static_cast<unsigned long long>(editHistory.undoCount()),
                          static_cast<unsigned long long>(editHistory.redoCount()));
+        DrawFormatString(PanelContentX, infoY + 242, text, "Tool        %s",
+                         selectedPatternIndex == 0 ? ShapeDrawing::toolName(shapeTool) : "Pattern");
 
         DrawString(PanelContentX, 876, "ROTATION", muted);
         const bool rotationEnabled = selectedPatternIndex != 0;
@@ -488,14 +539,18 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
 
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        DrawString(PanelContentX, 966, "P select Q/E rotate Esc/RMB cancel", muted);
+        DrawString(PanelContentX, 966, "Shape: drag LMB add / RMB erase", muted);
         DrawString(PanelContentX, 988, "Ctrl+Z/Y undo/redo  Ctrl+S/L save/load", muted);
         ScreenFlip();
 
         ++fpsFrameCount;
         const auto fpsSampleEnd = Clock::now();
         const double fpsSampleSeconds = std::chrono::duration<double>(fpsSampleEnd - fpsSampleStart).count();
-        if (fpsSampleSeconds >= 0.5) { fps = fpsFrameCount / fpsSampleSeconds; fpsFrameCount = 0; fpsSampleStart = fpsSampleEnd; }
+        if (fpsSampleSeconds >= 0.5) {
+            fps = fpsFrameCount / fpsSampleSeconds;
+            fpsFrameCount = 0;
+            fpsSampleStart = fpsSampleEnd;
+        }
 
         performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
                                  board.aliveCellCount(), board.chunkCount(), paused);
