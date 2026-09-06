@@ -1,12 +1,15 @@
 #include "DxLib.h"
 #include "InfiniteCamera.h"
 #include "InfiniteLifeBoard.h"
+#include "PatternLibrary.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <thread>
+#include <utility>
 
 namespace {
 constexpr int ScreenWidth = 1024;
@@ -25,7 +28,37 @@ void seedGlider(InfiniteLifeBoard& board) {
     board.setAlive(1, 2, true);
     board.setAlive(2, 2, true);
 }
+
+std::pair<int, int> rotatedCell(PatternCell cell, int rotation) noexcept {
+    switch (rotation & 3) {
+    case 1: return {-cell.y, cell.x};
+    case 2: return {-cell.x, -cell.y};
+    case 3: return {cell.y, -cell.x};
+    default: return {cell.x, cell.y};
+    }
 }
+
+std::pair<int, int> rotationOffset(const LifePattern& pattern, int rotation) noexcept {
+    int minX = 0;
+    int minY = 0;
+    for (const PatternCell cell : pattern.cells) {
+        const auto [x, y] = rotatedCell(cell, rotation);
+        minX = std::min(minX, x);
+        minY = std::min(minY, y);
+    }
+    return {-minX, -minY};
+}
+
+void placePattern(InfiniteLifeBoard& board, const LifePattern& pattern,
+                  InfiniteLifeBoard::Coord originX, InfiniteLifeBoard::Coord originY,
+                  int rotation) {
+    const auto [offsetX, offsetY] = rotationOffset(pattern, rotation);
+    for (const PatternCell cell : pattern.cells) {
+        const auto [rx, ry] = rotatedCell(cell, rotation);
+        board.setAlive(originX + rx + offsetX, originY + ry + offsetY, true);
+    }
+}
+} // namespace
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     SetMainWindowText("LifeGameDxlibVersion3 - Infinite Plane Prototype");
@@ -46,8 +79,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousDelete = false;
     bool previousPageUp = false;
     bool previousPageDown = false;
+    bool previousP = false;
+    bool previousQ = false;
+    bool previousE = false;
+    bool previousLeft = false;
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
+    std::size_t selectedPatternIndex = 0;
+    int patternRotation = 0;
     double simulationAccumulator = 0.0;
     double fps = 0.0;
 
@@ -73,6 +112,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool del = CheckHitKey(KEY_INPUT_DELETE) != 0;
         const bool pageUp = CheckHitKey(KEY_INPUT_PGUP) != 0;
         const bool pageDown = CheckHitKey(KEY_INPUT_PGDN) != 0;
+        const bool p = CheckHitKey(KEY_INPUT_P) != 0;
+        const bool q = CheckHitKey(KEY_INPUT_Q) != 0;
+        const bool e = CheckHitKey(KEY_INPUT_E) != 0;
+        const bool shift = CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
 
         if (enter && !previousEnter) {
             paused = !paused;
@@ -91,6 +134,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (pageDown && !previousPageDown && simulationSpeedIndex > 0) {
             --simulationSpeedIndex;
             simulationAccumulator = 0.0;
+        }
+        if (p && !previousP) {
+            if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
+            else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
+            patternRotation = 0;
+        }
+        if (q && !previousQ && PatternLibrary::at(selectedPatternIndex).category != PatternCategory::Cell) {
+            patternRotation = (patternRotation + 3) & 3;
+        }
+        if (e && !previousE && PatternLibrary::at(selectedPatternIndex).category != PatternCategory::Cell) {
+            patternRotation = (patternRotation + 1) & 3;
         }
 
         if (CheckHitKey(KEY_INPUT_LEFT)) camera.move(-4, 0);
@@ -122,9 +176,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
         }
 
-        if (paused && (left || right) && !middle) {
+        if (paused && !middle) {
+            const LifePattern& pattern = PatternLibrary::at(selectedPatternIndex);
             const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
-            board.setAlive(x, y, left && !right);
+            if (pattern.category == PatternCategory::Cell) {
+                if (left || right) board.setAlive(x, y, left && !right);
+            } else if (left && !previousLeft) {
+                placePattern(board, pattern, x, y, patternRotation);
+            }
         }
 
         if (paused) {
@@ -153,14 +212,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             DrawBox(sx, sy, sx + size - 1, sy + size - 1, aliveColor, TRUE);
         });
 
+        const LifePattern& selectedPattern = PatternLibrary::at(selectedPatternIndex);
         DrawFormatString(8, 8, GetColor(255, 255, 255), "Generation: %llu", static_cast<unsigned long long>(generation));
         DrawFormatString(8, 30, GetColor(255, 255, 255), "Alive: %llu  Chunks: %llu", static_cast<unsigned long long>(board.aliveCellCount()), static_cast<unsigned long long>(board.chunkCount()));
         DrawFormatString(8, 52, GetColor(255, 255, 255), "Camera: (%lld, %lld)  Zoom: %d", static_cast<long long>(camera.x()), static_cast<long long>(camera.y()), camera.cellSize());
         DrawFormatString(8, 74, GetColor(255, 255, 255), "FPS: %.1f  Speed: %d gen/s", fps, SimulationSpeeds[simulationSpeedIndex]);
-        DrawString(8, 96, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        DrawString(8, 118, "Enter: pause  Space: step  PageUp/PageDown: speed", GetColor(180, 180, 180));
-        DrawString(8, 140, "Arrows / Middle drag: move  Wheel: zoom", GetColor(180, 180, 180));
-        DrawString(8, 162, "Paused: Left drag = alive  Right drag = dead  Delete: clear", GetColor(180, 180, 180));
+        DrawFormatString(8, 96, GetColor(255, 255, 255), "Pattern: %s [%s]  Rotation: R%d", selectedPattern.name, PatternLibrary::categoryName(selectedPattern.category), patternRotation * 90);
+        DrawString(8, 118, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
+        DrawString(8, 140, "Enter: pause  Space: step  PageUp/PageDown: speed", GetColor(180, 180, 180));
+        DrawString(8, 162, "Arrows / Middle drag: move  Wheel: zoom", GetColor(180, 180, 180));
+        DrawString(8, 184, "P / Shift+P: pattern  Q/E: rotate", GetColor(180, 180, 180));
+        DrawString(8, 206, "Cell: Left/Right drag  Pattern: Left click  Delete: clear", GetColor(180, 180, 180));
         ScreenFlip();
 
         ++fpsFrameCount;
@@ -177,6 +239,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousDelete = del;
         previousPageUp = pageUp;
         previousPageDown = pageDown;
+        previousP = p;
+        previousQ = q;
+        previousE = e;
+        previousLeft = left;
         previousMouseX = mouseX;
         previousMouseY = mouseY;
 
