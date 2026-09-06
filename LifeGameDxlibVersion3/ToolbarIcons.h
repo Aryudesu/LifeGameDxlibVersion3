@@ -2,6 +2,8 @@
 
 #include "DxLib.h"
 
+#include <algorithm>
+
 namespace ToolbarIcons {
 
 enum class Icon { Undo, Redo, Save, Load, Cell, Line, Rectangle, Circle };
@@ -77,6 +79,32 @@ inline void drawButton(int mouseX, int mouseY, int x, int y, int size, Icon icon
 
     DrawBox(x, y, x + size - 1, y + size - 1, background, TRUE);
     draw(icon, x + (size - 24) / 2, y + (size - 24) / 2, foreground, background);
+}
+
+inline void drawTooltip(int mouseX, int mouseY, const char* text,
+                        int screenWidth, int screenHeight) {
+    if (text == nullptr || text[0] == '\0') return;
+
+    constexpr int paddingX = 8;
+    constexpr int paddingY = 5;
+    constexpr int gap = 12;
+    const int textWidth = GetDrawStringWidth(text, -1);
+    const int fontSize = GetFontSize();
+    const int width = textWidth + paddingX * 2;
+    const int height = fontSize + paddingY * 2;
+
+    int x = mouseX + gap;
+    int y = mouseY + gap;
+    x = std::max(4, std::min(x, screenWidth - width - 4));
+    if (y + height + 4 > screenHeight) y = mouseY - height - gap;
+    y = std::max(4, std::min(y, screenHeight - height - 4));
+
+    const unsigned int background = GetColor(18, 20, 24);
+    const unsigned int border = GetColor(95, 100, 110);
+    const unsigned int foreground = GetColor(240, 240, 240);
+    DrawBox(x, y, x + width, y + height, background, TRUE);
+    DrawBox(x, y, x + width, y + height, border, FALSE);
+    DrawString(x + paddingX, y + paddingY, text, foreground);
 }
 
 } // namespace ToolbarIcons
