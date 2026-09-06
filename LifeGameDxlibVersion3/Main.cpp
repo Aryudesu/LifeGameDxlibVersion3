@@ -93,11 +93,25 @@ std::size_t firstPatternInCategory(PatternCategory category) noexcept {
     }
     return 0;
 }
+
+void drawGrid(const InfiniteCamera& camera) {
+    const int cellSize = camera.cellSize();
+    if (cellSize <= 1) return;
+
+    const unsigned int gridColor = GetColor(45, 45, 45);
+    for (int x = 0; x <= BoardViewWidth; x += cellSize) {
+        DrawLine(x, 0, x, ScreenHeight, gridColor);
+    }
+    for (int y = 0; y <= ScreenHeight; y += cellSize) {
+        DrawLine(0, y, BoardViewWidth, y, gridColor);
+    }
+}
 } // namespace
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     SetMainWindowText("LifeGameDxlibVersion3 - Infinite Plane");
     SetWindowSizeChangeEnableFlag(FALSE);
+    SetAlwaysRunFlag(TRUE);
     ChangeWindowMode(TRUE);
     SetGraphMode(WindowWidth, ScreenHeight, 32);
     SetOutApplicationLogValidFlag(FALSE);
@@ -110,6 +124,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     seedGlider(board);
 
     bool paused = false;
+    bool showGrid = false;
     bool previousEnter = false;
     bool previousSpace = false;
     bool previousDelete = false;
@@ -118,6 +133,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousP = false;
     bool previousQ = false;
     bool previousE = false;
+    bool previousG = false;
     bool previousLeft = false;
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
@@ -152,6 +168,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool p = CheckHitKey(KEY_INPUT_P) != 0;
         const bool q = CheckHitKey(KEY_INPUT_Q) != 0;
         const bool e = CheckHitKey(KEY_INPUT_E) != 0;
+        const bool g = CheckHitKey(KEY_INPUT_G) != 0;
         const bool shift = CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
 
         if (enter && !previousEnter) {
@@ -164,6 +181,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             paused = true;
             simulationAccumulator = 0.0;
         }
+        if (g && !previousG) showGrid = !showGrid;
         if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) {
             ++simulationSpeedIndex;
             simulationAccumulator = 0.0;
@@ -311,6 +329,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (sx + size <= 0 || sy + size <= 0 || sx >= BoardViewWidth || sy >= ScreenHeight) return;
             DrawBox(sx, sy, sx + size - 1, sy + size - 1, aliveColor, TRUE);
         });
+        if (showGrid) drawGrid(camera);
 
         const unsigned int background = GetColor(28, 30, 34);
         const unsigned int section = GetColor(45, 48, 54);
@@ -366,6 +385,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawFormatString(PanelContentX, infoY + 122, text, "Chunks      %llu", static_cast<unsigned long long>(board.chunkCount()));
         DrawFormatString(PanelContentX, infoY + 146, text, "Camera      (%lld, %lld)", static_cast<long long>(camera.x()), static_cast<long long>(camera.y()));
         DrawFormatString(PanelContentX, infoY + 170, text, "Zoom        %d", camera.cellSize());
+        DrawFormatString(PanelContentX, infoY + 194, text, "Grid        %s", showGrid ? "ON" : "OFF");
 
         DrawString(PanelContentX, 876, "ROTATION", muted);
         const bool rotationEnabled = selectedPatternIndex != 0;
@@ -379,7 +399,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING",
                    paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        DrawString(PanelContentX, 966, "P/Shift+P: select   Q/E: rotate", muted);
+        DrawString(PanelContentX, 966, "P/Shift+P select  Q/E rotate  G grid", muted);
         DrawString(PanelContentX, 988, "Wheel list / Click pattern", muted);
         ScreenFlip();
 
@@ -400,6 +420,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousP = p;
         previousQ = q;
         previousE = e;
+        previousG = g;
         previousLeft = left;
         previousMouseX = mouseX;
         previousMouseY = mouseY;
