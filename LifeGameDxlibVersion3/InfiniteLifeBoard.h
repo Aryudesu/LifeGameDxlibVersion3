@@ -32,7 +32,11 @@ private:
 
     struct Chunk {
         std::array<std::uint64_t, ChunkSize> rows{};
-        bool empty() const noexcept;
+        std::uint64_t nonEmptyRows = 0;
+        std::uint64_t westEdgeRows = 0;
+        std::uint64_t eastEdgeRows = 0;
+
+        bool empty() const noexcept { return nonEmptyRows == 0; }
     };
 
     std::unordered_map<ChunkCoord, Chunk, ChunkCoordHash> chunks_;
