@@ -67,22 +67,7 @@ inline void draw(Icon icon, int x, int y, unsigned int color, unsigned int panel
     }
 }
 
-inline void drawButton(int mouseX, int mouseY, int x, int y, int size, Icon icon,
-                       bool selected, bool enabled) {
-    const bool hover = hit(mouseX, mouseY, x, y, size);
-    const unsigned int normal = GetColor(45, 48, 54);
-    const unsigned int hovered = GetColor(60, 64, 72);
-    const unsigned int selectedColor = GetColor(70, 105, 75);
-    const unsigned int disabled = GetColor(105, 110, 115);
-    const unsigned int foreground = enabled ? GetColor(235, 235, 235) : disabled;
-    const unsigned int background = selected ? selectedColor : (hover && enabled ? hovered : normal);
-
-    DrawBox(x, y, x + size - 1, y + size - 1, background, TRUE);
-    draw(icon, x + (size - 24) / 2, y + (size - 24) / 2, foreground, background);
-}
-
-inline void drawTooltip(int mouseX, int mouseY, const char* text,
-                        int screenWidth, int screenHeight) {
+inline void drawTooltip(int mouseX, int mouseY, const char* text) {
     if (text == nullptr || text[0] == '\0') return;
 
     constexpr int paddingX = 8;
@@ -92,6 +77,10 @@ inline void drawTooltip(int mouseX, int mouseY, const char* text,
     const int fontSize = GetFontSize();
     const int width = textWidth + paddingX * 2;
     const int height = fontSize + paddingY * 2;
+
+    int screenWidth = 0;
+    int screenHeight = 0;
+    GetDrawScreenSize(&screenWidth, &screenHeight);
 
     int x = mouseX + gap;
     int y = mouseY + gap;
@@ -105,6 +94,21 @@ inline void drawTooltip(int mouseX, int mouseY, const char* text,
     DrawBox(x, y, x + width, y + height, background, TRUE);
     DrawBox(x, y, x + width, y + height, border, FALSE);
     DrawString(x + paddingX, y + paddingY, text, foreground);
+}
+
+inline void drawButton(int mouseX, int mouseY, int x, int y, int size, Icon icon,
+                       bool selected, bool enabled) {
+    const bool hover = hit(mouseX, mouseY, x, y, size);
+    const unsigned int normal = GetColor(45, 48, 54);
+    const unsigned int hovered = GetColor(60, 64, 72);
+    const unsigned int selectedColor = GetColor(70, 105, 75);
+    const unsigned int disabled = GetColor(105, 110, 115);
+    const unsigned int foreground = enabled ? GetColor(235, 235, 235) : disabled;
+    const unsigned int background = selected ? selectedColor : (hover && enabled ? hovered : normal);
+
+    DrawBox(x, y, x + size - 1, y + size - 1, background, TRUE);
+    draw(icon, x + (size - 24) / 2, y + (size - 24) / 2, foreground, background);
+    if (hover) drawTooltip(mouseX, mouseY, label(icon));
 }
 
 } // namespace ToolbarIcons
