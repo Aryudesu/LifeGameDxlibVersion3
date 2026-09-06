@@ -39,6 +39,7 @@
     <ClCompile Include="RleParser.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="EditHistory.h" />
     <ClInclude Include="FileDialog.h" />
     <ClInclude Include="InfiniteCamera.h" />
     <ClInclude Include="InfiniteLifeBoard.h" />
