@@ -49,6 +49,7 @@
     <ClInclude Include="PatternPlacementPreview.h" />
     <ClInclude Include="PerformanceLogger.h" />
     <ClInclude Include="RleParser.h" />
+    <ClInclude Include="ShapeDrawing.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
