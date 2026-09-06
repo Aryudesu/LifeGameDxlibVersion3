@@ -30,16 +30,6 @@ private:
         std::size_t operator()(const ChunkCoord& value) const noexcept;
     };
 
-    struct CellCoord {
-        Coord x = 0;
-        Coord y = 0;
-        bool operator==(const CellCoord&) const noexcept = default;
-    };
-
-    struct CellCoordHash {
-        std::size_t operator()(const CellCoord& value) const noexcept;
-    };
-
     struct Chunk {
         std::array<std::uint64_t, ChunkSize> rows{};
         bool empty() const noexcept;
