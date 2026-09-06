@@ -201,6 +201,9 @@ void InfiniteLifeBoard::step() {
         const Chunk* south = neighborhood[2][1];
         const Chunk* southEast = neighborhood[2][2];
 
+        // Track row occupancy and edge occupancy in each chunk so sparse chunks
+        // can skip untouched rows. A target row only needs work when a live
+        // source exists in that row or one of its two vertical neighbors.
         std::uint64_t sourceRows = center == nullptr ? 0 : center->nonEmptyRows;
         if (west != nullptr) sourceRows |= west->eastEdgeRows;
         if (east != nullptr) sourceRows |= east->westEdgeRows;
