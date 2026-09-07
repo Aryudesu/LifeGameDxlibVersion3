@@ -1,9 +1,13 @@
 #include "InfiniteLifeBoard.h"
 
 #include <bit>
+#include <fstream>
 #include <limits>
+#include <sstream>
+#include <string>
 #include <unordered_set>
 #include <utility>
+#include <windows.h>
 
 namespace {
 std::size_t mix64(std::uint64_t value) noexcept {
@@ -13,6 +17,36 @@ std::size_t mix64(std::uint64_t value) noexcept {
     value *= 0xc4ceb9fe1a85ec53ULL;
     value ^= value >> 33;
     return static_cast<std::size_t>(value);
+}
+
+std::string boardDebugLogPath() {
+    char modulePath[MAX_PATH]{};
+    const DWORD length = GetModuleFileNameA(nullptr, modulePath, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        return "LifeGameBoardDebug.log";
+    }
+
+    std::string path(modulePath, length);
+    const std::size_t separator = path.find_last_of("\\/");
+    if (separator == std::string::npos) {
+        return "LifeGameBoardDebug.log";
+    }
+    return path.substr(0, separator + 1) + "LifeGameBoardDebug.log";
+}
+
+void boardDebugLog(const std::string& message) {
+    const std::string line = "[LifeGameBoard] " + message + "\n";
+    OutputDebugStringA(line.c_str());
+
+    std::ofstream log(boardDebugLogPath(), std::ios::app);
+    if (log) {
+        log << line;
+    }
+}
+
+bool shouldLogCoordinate(InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) noexcept {
+    return x % InfiniteLifeBoard::ChunkSize == 0 ||
+           y % InfiniteLifeBoard::ChunkSize == 0;
 }
 }
 
@@ -60,20 +94,59 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
     const std::uint64_t cellMask = std::uint64_t{1} << lx;
     const std::uint64_t rowMask = std::uint64_t{1} << ly;
 
+    const bool logCoordinate = shouldLogCoordinate(x, y);
+    if (logCoordinate) {
+        std::ostringstream message;
+        message << "SET BEGIN"
+                << " x=" << x
+                << " y=" << y
+                << " alive=" << (alive ? 1 : 0)
+                << " x/64=" << (x / ChunkSize)
+                << " x%64=" << (x % ChunkSize)
+                << " y/64=" << (y / ChunkSize)
+                << " y%64=" << (y % ChunkSize)
+                << " chunkX=" << chunkCoord.x
+                << " chunkY=" << chunkCoord.y
+                << " localX=" << lx
+                << " localY=" << ly;
+        boardDebugLog(message.str());
+    }
+
     if (alive) {
         Chunk& chunk = chunks_[chunkCoord];
-        if ((chunk.rows[ly] & cellMask) == 0) {
+        const bool wasAlive = (chunk.rows[ly] & cellMask) != 0;
+        if (!wasAlive) {
             chunk.rows[ly] |= cellMask;
             chunk.nonEmptyRows |= rowMask;
             if (lx == 0) chunk.westEdgeRows |= rowMask;
             if (lx == ChunkSize - 1) chunk.eastEdgeRows |= rowMask;
             ++aliveCellCount_;
         }
+
+        if (logCoordinate) {
+            std::ostringstream message;
+            message << "SET END"
+                    << " x=" << x
+                    << " y=" << y
+                    << " wasAlive=" << (wasAlive ? 1 : 0)
+                    << " isAliveNow=" << (isAlive(x, y) ? 1 : 0)
+                    << " chunkX=" << chunkCoord.x
+                    << " chunkY=" << chunkCoord.y
+                    << " localX=" << lx
+                    << " localY=" << ly
+                    << " aliveCellCount=" << aliveCellCount_;
+            boardDebugLog(message.str());
+        }
         return;
     }
 
     const auto it = chunks_.find(chunkCoord);
-    if (it == chunks_.end() || (it->second.rows[ly] & cellMask) == 0) return;
+    if (it == chunks_.end() || (it->second.rows[ly] & cellMask) == 0) {
+        if (logCoordinate) {
+            boardDebugLog("SET END removal skipped: requested cell was not alive");
+        }
+        return;
+    }
 
     Chunk& chunk = it->second;
     chunk.rows[ly] &= ~cellMask;
@@ -82,6 +155,16 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
     if (lx == ChunkSize - 1 && (chunk.rows[ly] & EastEdgeMask) == 0) chunk.eastEdgeRows &= ~rowMask;
     --aliveCellCount_;
     if (chunk.empty()) chunks_.erase(it);
+
+    if (logCoordinate) {
+        std::ostringstream message;
+        message << "SET END removal"
+                << " x=" << x
+                << " y=" << y
+                << " isAliveNow=" << (isAlive(x, y) ? 1 : 0)
+                << " aliveCellCount=" << aliveCellCount_;
+        boardDebugLog(message.str());
+    }
 }
 
 void InfiniteLifeBoard::clear() noexcept {
