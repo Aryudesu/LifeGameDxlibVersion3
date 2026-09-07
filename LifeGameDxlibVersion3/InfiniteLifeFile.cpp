@@ -19,22 +19,31 @@ constexpr std::uint64_t MaxPayloadBytes = 256ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t MaxCellCount = MaxPayloadBytes / BytesPerCell;
 constexpr std::uint32_t FnvOffset = 2166136261u;
 constexpr std::uint32_t FnvPrime = 16777619u;
-constexpr const char* CoordinateDebugLogPath = "LifeGameCoordinateDebug.log";
+
+std::string coordinateDebugLogPath;
+
+void setCoordinateDebugLogPath(const std::string& savePath) {
+    coordinateDebugLogPath = savePath + ".coord.log";
+}
 
 void debugLog(const std::string& message) {
-    std::ofstream log(CoordinateDebugLogPath, std::ios::app);
-    if (log) log << message << '\n';
+    if (!coordinateDebugLogPath.empty()) {
+        std::ofstream log(coordinateDebugLogPath, std::ios::app);
+        if (log) log << message << '\n';
+    }
+
+    const std::string debuggerMessage = "[LifeGameCoord] " + message + "\n";
+    OutputDebugStringA(debuggerMessage.c_str());
 }
 
 void debugLogCoord(const char* stage, InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
-    std::ofstream log(CoordinateDebugLogPath, std::ios::app);
-    if (!log) return;
-    log << stage
-        << " x=" << x
-        << " y=" << y
-        << " x%64=" << (x % InfiniteLifeBoard::ChunkSize)
-        << " y%64=" << (y % InfiniteLifeBoard::ChunkSize)
-        << '\n';
+    const std::string message =
+        std::string(stage) +
+        " x=" + std::to_string(x) +
+        " y=" + std::to_string(y) +
+        " x%64=" + std::to_string(x % InfiniteLifeBoard::ChunkSize) +
+        " y%64=" + std::to_string(y % InfiniteLifeBoard::ChunkSize);
+    debugLog(message);
 }
 
 void writeU32(std::ostream& output, std::uint32_t value) {
@@ -107,7 +116,9 @@ bool save(
     std::string& errorMessage) {
     errorMessage.clear();
 
+    setCoordinateDebugLogPath(path);
     debugLog("=== SAVE BEGIN path=" + path + " ===");
+    debugLog("LOG PATH=" + coordinateDebugLogPath);
 
     const std::uint64_t cellCount = board.aliveCellCount();
     if (cellCount > MaxCellCount) {
@@ -165,7 +176,9 @@ bool load(
     std::string& errorMessage) {
     errorMessage.clear();
 
+    setCoordinateDebugLogPath(path);
     debugLog("=== LOAD BEGIN path=" + path + " ===");
+    debugLog("LOG PATH=" + coordinateDebugLogPath);
 
     std::ifstream input(path, std::ios::binary);
     if (!input) {
@@ -229,14 +242,10 @@ bool load(
             debugLogCoord("LOAD-READ", x, y);
 
             loadedBoard.setAlive(x, y, true);
-
-            std::ofstream log(CoordinateDebugLogPath, std::ios::app);
-            if (log) {
-                log << "LOAD-SET x=" << x
-                    << " y=" << y
-                    << " isAliveRequested=" << (loadedBoard.isAlive(x, y) ? 1 : 0)
-                    << '\n';
-            }
+            debugLog(
+                "LOAD-SET x=" + std::to_string(x) +
+                " y=" + std::to_string(y) +
+                " isAliveRequested=" + std::to_string(loadedBoard.isAlive(x, y) ? 1 : 0));
         }
     } catch (const std::bad_alloc&) {
         errorMessage = "Not enough memory to load the save file.";
