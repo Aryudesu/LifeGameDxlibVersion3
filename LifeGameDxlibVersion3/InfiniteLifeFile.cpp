@@ -20,32 +20,6 @@ constexpr std::uint64_t MaxCellCount = MaxPayloadBytes / BytesPerCell;
 constexpr std::uint32_t FnvOffset = 2166136261u;
 constexpr std::uint32_t FnvPrime = 16777619u;
 
-std::string coordinateDebugLogPath;
-
-void setCoordinateDebugLogPath(const std::string& savePath) {
-    coordinateDebugLogPath = savePath + ".coord.log";
-}
-
-void debugLog(const std::string& message) {
-    if (!coordinateDebugLogPath.empty()) {
-        std::ofstream log(coordinateDebugLogPath, std::ios::app);
-        if (log) log << message << '\n';
-    }
-
-    const std::string debuggerMessage = "[LifeGameCoord] " + message + "\n";
-    OutputDebugStringA(debuggerMessage.c_str());
-}
-
-void debugLogCoord(const char* stage, InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
-    const std::string message =
-        std::string(stage) +
-        " x=" + std::to_string(x) +
-        " y=" + std::to_string(y) +
-        " x%64=" + std::to_string(x % InfiniteLifeBoard::ChunkSize) +
-        " y%64=" + std::to_string(y % InfiniteLifeBoard::ChunkSize);
-    debugLog(message);
-}
-
 void writeU32(std::ostream& output, std::uint32_t value) {
     for (int i = 0; i < 4; ++i) {
         output.put(static_cast<char>((value >> (i * 8)) & 0xff));
@@ -116,14 +90,9 @@ bool save(
     std::string& errorMessage) {
     errorMessage.clear();
 
-    setCoordinateDebugLogPath(path);
-    debugLog("=== SAVE BEGIN path=" + path + " ===");
-    debugLog("LOG PATH=" + coordinateDebugLogPath);
-
     const std::uint64_t cellCount = board.aliveCellCount();
     if (cellCount > MaxCellCount) {
         errorMessage = "The board is too large to save in this format.";
-        debugLog("SAVE ERROR: too many cells");
         return false;
     }
 
@@ -132,7 +101,6 @@ bool save(
     std::ofstream output(temporaryPath, std::ios::binary | std::ios::trunc);
     if (!output) {
         errorMessage = "Could not open the temporary save file.";
-        debugLog("SAVE ERROR: could not open temporary file");
         return false;
     }
 
@@ -143,7 +111,6 @@ bool save(
     writeU32(output, storedChecksum);
 
     board.forEachAliveCell([&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
-        debugLogCoord("SAVE-WRITE", x, y);
         writeU64(output, std::bit_cast<std::uint64_t>(x));
         writeU64(output, std::bit_cast<std::uint64_t>(y));
     });
@@ -153,7 +120,6 @@ bool save(
         output.close();
         DeleteFileA(temporaryPath.c_str());
         errorMessage = "Failed while writing the save file.";
-        debugLog("SAVE ERROR: write failed");
         return false;
     }
 
@@ -161,11 +127,9 @@ bool save(
     if (!replaceFile(temporaryPath, path)) {
         DeleteFileA(temporaryPath.c_str());
         errorMessage = "Could not replace the destination save file.";
-        debugLog("SAVE ERROR: replace failed");
         return false;
     }
 
-    debugLog("=== SAVE END cells=" + std::to_string(cellCount) + " ===");
     return true;
 }
 
@@ -176,14 +140,9 @@ bool load(
     std::string& errorMessage) {
     errorMessage.clear();
 
-    setCoordinateDebugLogPath(path);
-    debugLog("=== LOAD BEGIN path=" + path + " ===");
-    debugLog("LOG PATH=" + coordinateDebugLogPath);
-
     std::ifstream input(path, std::ios::binary);
     if (!input) {
         errorMessage = "Could not open the save file.";
-        debugLog("LOAD ERROR: could not open file");
         return false;
     }
 
@@ -191,7 +150,6 @@ bool load(
     input.read(magic.data(), static_cast<std::streamsize>(magic.size()));
     if (!input || magic != Magic) {
         errorMessage = "This is not a LifeGameDxlibVersion3 save file.";
-        debugLog("LOAD ERROR: invalid magic");
         return false;
     }
 
@@ -204,18 +162,15 @@ bool load(
         !readU64(input, cellCount) ||
         !readU32(input, storedChecksum)) {
         errorMessage = "The save file header is truncated.";
-        debugLog("LOAD ERROR: truncated header");
         return false;
     }
 
     if (version != FormatVersion) {
         errorMessage = "Unsupported save file version.";
-        debugLog("LOAD ERROR: unsupported version");
         return false;
     }
     if (cellCount > MaxCellCount) {
         errorMessage = "The save file contains too many live cells.";
-        debugLog("LOAD ERROR: too many cells");
         return false;
     }
 
@@ -230,54 +185,36 @@ bool load(
             std::uint64_t yBits = 0;
             if (!readU64(input, xBits) || !readU64(input, yBits)) {
                 errorMessage = "The save file data is truncated.";
-                debugLog("LOAD ERROR: truncated cell data");
                 return false;
             }
 
             checksumU64(calculatedChecksum, xBits);
             checksumU64(calculatedChecksum, yBits);
-
-            const auto x = std::bit_cast<InfiniteLifeBoard::Coord>(xBits);
-            const auto y = std::bit_cast<InfiniteLifeBoard::Coord>(yBits);
-            debugLogCoord("LOAD-READ", x, y);
-
-            loadedBoard.setAlive(x, y, true);
-            debugLog(
-                "LOAD-SET x=" + std::to_string(x) +
-                " y=" + std::to_string(y) +
-                " isAliveRequested=" + std::to_string(loadedBoard.isAlive(x, y) ? 1 : 0));
+            loadedBoard.setAlive(
+                std::bit_cast<InfiniteLifeBoard::Coord>(xBits),
+                std::bit_cast<InfiniteLifeBoard::Coord>(yBits),
+                true);
         }
     } catch (const std::bad_alloc&) {
         errorMessage = "Not enough memory to load the save file.";
-        debugLog("LOAD ERROR: bad_alloc");
         return false;
     }
 
-    debugLog("--- LOAD ENUMERATE BEGIN ---");
-    loadedBoard.forEachAliveCell([&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
-        debugLogCoord("LOAD-ENUM", x, y);
-    });
-    debugLog("--- LOAD ENUMERATE END ---");
-
     if (input.peek() != EOF) {
         errorMessage = "Unexpected extra data was found in the save file.";
-        debugLog("LOAD ERROR: unexpected extra data");
         return false;
     }
     if (calculatedChecksum != storedChecksum) {
         errorMessage = "The save file checksum does not match.";
-        debugLog("LOAD ERROR: checksum mismatch");
         return false;
     }
     if (loadedBoard.aliveCellCount() != cellCount) {
         errorMessage = "The save file contains duplicate cell coordinates.";
-        debugLog("LOAD ERROR: duplicate coordinates");
         return false;
     }
 
     board = std::move(loadedBoard);
     generation = loadedGeneration;
-    debugLog("=== LOAD END cells=" + std::to_string(cellCount) + " ===");
     return true;
 }
 } // namespace InfiniteLifeFile
