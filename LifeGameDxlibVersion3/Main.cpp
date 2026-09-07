@@ -9,6 +9,7 @@
 #include "PatternPlacementPreview.h"
 #include "PerformanceLogger.h"
 #include "ShapeDrawing.h"
+#include "ToolbarIcons.h"
 
 #include <algorithm>
 #include <array>
@@ -32,10 +33,20 @@ constexpr std::size_t DefaultSimulationSpeedIndex = 4;
 constexpr int PanelX = BoardViewWidth;
 constexpr int PanelPadding = 16;
 constexpr int PanelContentX = PanelX + PanelPadding;
-constexpr int ToolButtonY = 42;
-constexpr int ToolButtonWidth = 66;
-constexpr int ToolButtonHeight = 30;
+constexpr int PanelContentWidth = PanelWidth - PanelPadding * 2;
+
+constexpr int ActionButtonSize = 28;
+constexpr int ActionButtonGap = 4;
+constexpr int ActionButtonY = 8;
+constexpr int ActionToolbarWidth = ActionButtonSize * 4 + ActionButtonGap * 3;
+constexpr int ActionToolbarX = WindowWidth - PanelPadding - ActionToolbarWidth;
+
+constexpr int ToolButtonY = 44;
+constexpr int ToolButtonSize = 34;
 constexpr int ToolButtonGap = 8;
+constexpr int ToolToolbarWidth = ToolButtonSize * 4 + ToolButtonGap * 3;
+constexpr int ToolToolbarX = PanelContentX + (PanelContentWidth - ToolToolbarWidth) / 2;
+
 constexpr int PatternListY = 198;
 constexpr int PatternRowHeight = 28;
 constexpr int PatternListBottom = PatternListY + PatternListScroll::VisibleRows * PatternRowHeight;
@@ -48,11 +59,25 @@ constexpr int RotationValueX = RotationLeftX + RotationButtonWidth + RotationGap
 constexpr int RotationRightX = RotationValueX + RotationValueWidth + RotationGap;
 constexpr int RotationHeight = 30;
 
+constexpr std::array ActionIcons = {
+    ToolbarIcons::Icon::Undo,
+    ToolbarIcons::Icon::Redo,
+    ToolbarIcons::Icon::Save,
+    ToolbarIcons::Icon::Load
+};
+
 constexpr std::array ShapeTools = {
     ShapeDrawing::Tool::Cell,
     ShapeDrawing::Tool::Line,
     ShapeDrawing::Tool::Rectangle,
     ShapeDrawing::Tool::Circle
+};
+
+constexpr std::array ShapeIcons = {
+    ToolbarIcons::Icon::Cell,
+    ToolbarIcons::Icon::Line,
+    ToolbarIcons::Icon::Rectangle,
+    ToolbarIcons::Icon::Circle
 };
 
 constexpr std::array ToolCategories = {
@@ -158,6 +183,41 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     auto fpsSampleStart = previousFrameTime;
     int fpsFrameCount = 0;
 
+    auto resetTimingAfterDialog = [&]() {
+        const auto resetTime = Clock::now();
+        previousFrameTime = resetTime;
+        nextFrameTime = resetTime;
+        fpsSampleStart = resetTime;
+        fpsFrameCount = 0;
+    };
+
+    auto saveWithDialog = [&]() {
+        std::string path;
+        if (FileDialog::chooseSavePath(path)) {
+            std::string errorMessage;
+            if (!InfiniteLifeFile::save(board, generation, path, errorMessage)) FileDialog::showError(errorMessage);
+        }
+        resetTimingAfterDialog();
+    };
+
+    auto loadWithDialog = [&]() {
+        std::string path;
+        if (FileDialog::chooseLoadPath(path)) {
+            std::string errorMessage;
+            if (InfiniteLifeFile::load(board, generation, path, errorMessage)) {
+                editHistory.clear();
+                cellStrokeActive = false;
+                cellStrokeHasLastCell = false;
+                shapeDragActive = false;
+                paused = true;
+                simulationAccumulator = 0.0;
+            } else {
+                FileDialog::showError(errorMessage);
+            }
+        }
+        resetTimingAfterDialog();
+    };
+
     while (ProcessMessage() == 0) {
         const auto frameStart = Clock::now();
         const double elapsedSeconds = std::chrono::duration<double>(frameStart - previousFrameTime).count();
@@ -204,38 +264,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         if (paused && undoShortcut && !previousUndoShortcut && !cellStrokeActive && !shapeDragActive) editHistory.undo(board);
         if (paused && redoShortcut && !previousRedoShortcut && !cellStrokeActive && !shapeDragActive) editHistory.redo(board);
-
-        bool usedFileDialog = false;
-        if (saveShortcut && !previousSaveShortcut) {
-            std::string path;
-            if (FileDialog::chooseSavePath(path)) {
-                std::string errorMessage;
-                if (!InfiniteLifeFile::save(board, generation, path, errorMessage)) FileDialog::showError(errorMessage);
-            }
-            usedFileDialog = true;
-        }
-        if (loadShortcut && !previousLoadShortcut) {
-            std::string path;
-            if (FileDialog::chooseLoadPath(path)) {
-                std::string errorMessage;
-                if (InfiniteLifeFile::load(board, generation, path, errorMessage)) {
-                    editHistory.clear();
-                    cellStrokeActive = false;
-                    cellStrokeHasLastCell = false;
-                    shapeDragActive = false;
-                    paused = true;
-                    simulationAccumulator = 0.0;
-                } else FileDialog::showError(errorMessage);
-            }
-            usedFileDialog = true;
-        }
-        if (usedFileDialog) {
-            const auto resetTime = Clock::now();
-            previousFrameTime = resetTime;
-            nextFrameTime = resetTime;
-            fpsSampleStart = resetTime;
-            fpsFrameCount = 0;
-        }
+        if (saveShortcut && !previousSaveShortcut) saveWithDialog();
+        if (loadShortcut && !previousLoadShortcut) loadWithDialog();
 
         if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) { ++simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (pageDown && !previousPageDown && simulationSpeedIndex > 0) { --simulationSpeedIndex; simulationAccumulator = 0.0; }
@@ -280,16 +310,40 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         if (mouseOnPanel && leftPressed) {
             bool handled = false;
-            for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
-                const int leftX = PanelContentX + static_cast<int>(i) * (ToolButtonWidth + ToolButtonGap);
-                if (inRect(mouseX, mouseY, leftX, ToolButtonY, leftX + ToolButtonWidth, ToolButtonY + ToolButtonHeight)) {
+            const bool historyEnabled = paused && !cellStrokeActive && !shapeDragActive;
+
+            for (std::size_t i = 0; i < ActionIcons.size() && !handled; ++i) {
+                const int leftX = ActionToolbarX + static_cast<int>(i) * (ActionButtonSize + ActionButtonGap);
+                if (!ToolbarIcons::hit(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize)) continue;
+
+                switch (ActionIcons[i]) {
+                case ToolbarIcons::Icon::Undo:
+                    if (historyEnabled && editHistory.undoCount() > 0) editHistory.undo(board);
+                    break;
+                case ToolbarIcons::Icon::Redo:
+                    if (historyEnabled && editHistory.redoCount() > 0) editHistory.redo(board);
+                    break;
+                case ToolbarIcons::Icon::Save:
+                    saveWithDialog();
+                    break;
+                case ToolbarIcons::Icon::Load:
+                    loadWithDialog();
+                    break;
+                default:
+                    break;
+                }
+                handled = true;
+            }
+
+            for (std::size_t i = 0; i < ShapeTools.size() && !handled; ++i) {
+                const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
+                if (ToolbarIcons::hit(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize)) {
                     shapeTool = ShapeTools[i];
                     selectedPatternIndex = 0;
                     patternRotation = 0;
                     shapeDragActive = false;
                     cellStrokeHasLastCell = false;
                     handled = true;
-                    break;
                 }
             }
 
@@ -477,12 +531,19 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawBox(PanelX, 0, WindowWidth, ScreenHeight, background, TRUE);
         DrawString(PanelContentX, 14, "LIFE GAME TOOLS", text);
 
+        const bool historyEnabled = paused && !cellStrokeActive && !shapeDragActive;
+        for (std::size_t i = 0; i < ActionIcons.size(); ++i) {
+            const int leftX = ActionToolbarX + static_cast<int>(i) * (ActionButtonSize + ActionButtonGap);
+            bool enabled = true;
+            if (ActionIcons[i] == ToolbarIcons::Icon::Undo) enabled = historyEnabled && editHistory.undoCount() > 0;
+            if (ActionIcons[i] == ToolbarIcons::Icon::Redo) enabled = historyEnabled && editHistory.redoCount() > 0;
+            ToolbarIcons::drawButton(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize, ActionIcons[i], false, enabled);
+        }
+
         for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
-            const int leftX = PanelContentX + static_cast<int>(i) * (ToolButtonWidth + ToolButtonGap);
+            const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
             const bool isSelected = selectedPatternIndex == 0 && shapeTool == ShapeTools[i];
-            DrawBox(leftX, ToolButtonY, leftX + ToolButtonWidth, ToolButtonY + ToolButtonHeight,
-                    isSelected ? selected : section, TRUE);
-            DrawString(leftX + 7, ToolButtonY + 7, ShapeDrawing::toolName(ShapeTools[i]), text);
+            ToolbarIcons::drawButton(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize, ShapeIcons[i], isSelected, true);
         }
 
         for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
@@ -538,9 +599,22 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawFormatString(RotationValueX + 30, RotationY + 6, text, "R%d", patternRotation * 90);
         DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
 
+        const char* hoverHelp = nullptr;
+        if (mouseOnPanel) {
+            for (std::size_t i = 0; i < ActionIcons.size() && hoverHelp == nullptr; ++i) {
+                const int leftX = ActionToolbarX + static_cast<int>(i) * (ActionButtonSize + ActionButtonGap);
+                if (ToolbarIcons::hit(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize)) hoverHelp = ToolbarIcons::label(ActionIcons[i]);
+            }
+            for (std::size_t i = 0; i < ShapeIcons.size() && hoverHelp == nullptr; ++i) {
+                const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
+                if (ToolbarIcons::hit(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize)) hoverHelp = ToolbarIcons::label(ShapeIcons[i]);
+            }
+        }
+
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        DrawString(PanelContentX, 966, "Shape: drag LMB add / RMB erase", muted);
-        DrawString(PanelContentX, 988, "Ctrl+Z/Y undo/redo  Ctrl+S/L save/load", muted);
+        DrawString(PanelContentX, 966, hoverHelp != nullptr ? hoverHelp : "Shape: drag LMB add / RMB erase", muted);
+        DrawString(PanelContentX, 988, "Shortcuts: Ctrl+Z/Y/S/L, P, Q/E, G", muted);
+        if (hoverHelp != nullptr) ToolbarIcons::drawTooltip(mouseX, mouseY, hoverHelp, WindowWidth, ScreenHeight);
         ScreenFlip();
 
         ++fpsFrameCount;
