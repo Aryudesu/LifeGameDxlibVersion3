@@ -65,6 +65,28 @@ std::string coordinateError(const char* phase, std::uint64_t index, InfiniteLife
     return stream.str();
 }
 
+void writeCoordinateDiagnostic(
+    const std::string& savePath,
+    const char* phase,
+    std::uint64_t index,
+    InfiniteLifeBoard::Coord x,
+    InfiniteLifeBoard::Coord y,
+    const InfiniteLifeBoard& board) {
+    const std::string diagnosticPath = savePath + ".diagnostic.log";
+    std::ofstream output(diagnosticPath, std::ios::app);
+    if (!output) return;
+
+    output << "=== COORDINATE MISMATCH ===\n"
+           << "phase=" << phase << '\n'
+           << "cellIndex=" << index << '\n'
+           << "requestedX=" << x << '\n'
+           << "requestedY=" << y << '\n'
+           << "aliveCellCount=" << board.aliveCellCount() << '\n'
+           << "chunkCount=" << board.chunkCount() << '\n'
+           << board.debugCoordinateState(x, y)
+           << "=== END MISMATCH ===\n";
+}
+
 std::uint32_t calculateChecksum(const InfiniteLifeBoard& board, std::uint64_t generation) {
     std::uint32_t hash = FnvOffset;
     checksumU64(hash, generation);
@@ -90,8 +112,6 @@ bool save(const InfiniteLifeBoard& board, std::uint64_t generation, const std::s
         return false;
     }
 
-    // Investigation guard: every coordinate reconstructed by forEachAliveCell
-    // must resolve back to the same live cell before we serialize anything.
     bool boardConsistent = true;
     std::uint64_t checkedIndex = 0;
     InfiniteLifeBoard::Coord badX = 0;
@@ -105,7 +125,9 @@ bool save(const InfiniteLifeBoard& board, std::uint64_t generation, const std::s
         ++checkedIndex;
     });
     if (!boardConsistent) {
-        errorMessage = coordinateError("save validation", checkedIndex, badX, badY);
+        writeCoordinateDiagnostic(path, "save validation", checkedIndex, badX, badY, board);
+        errorMessage = coordinateError("save validation", checkedIndex, badX, badY) +
+            " Diagnostic: " + path + ".diagnostic.log";
         return false;
     }
     if (checkedIndex != cellCount) {
@@ -203,10 +225,10 @@ bool load(InfiniteLifeBoard& board, std::uint64_t& generation, const std::string
             const auto y = std::bit_cast<InfiniteLifeBoard::Coord>(yBits);
             loadedBoard.setAlive(x, y, true);
 
-            // Investigation guard: catches the failure at the exact insertion
-            // instead of only noticing a shifted/missing cell after loading.
             if (!loadedBoard.isAlive(x, y)) {
-                errorMessage = coordinateError("load insertion", i, x, y);
+                writeCoordinateDiagnostic(path, "load insertion", i, x, y, loadedBoard);
+                errorMessage = coordinateError("load insertion", i, x, y) +
+                    " Diagnostic: " + path + ".diagnostic.log";
                 return false;
             }
         }
@@ -228,8 +250,6 @@ bool load(InfiniteLifeBoard& board, std::uint64_t& generation, const std::string
         return false;
     }
 
-    // A second pass distinguishes an insertion-time failure from corruption of
-    // an earlier chunk caused by a later insertion.
     std::uint64_t enumeratedCount = 0;
     bool roundTripConsistent = true;
     InfiniteLifeBoard::Coord badX = 0;
@@ -243,7 +263,9 @@ bool load(InfiniteLifeBoard& board, std::uint64_t& generation, const std::string
         ++enumeratedCount;
     });
     if (!roundTripConsistent) {
-        errorMessage = coordinateError("load round-trip validation", enumeratedCount, badX, badY);
+        writeCoordinateDiagnostic(path, "load round-trip validation", enumeratedCount, badX, badY, loadedBoard);
+        errorMessage = coordinateError("load round-trip validation", enumeratedCount, badX, badY) +
+            " Diagnostic: " + path + ".diagnostic.log";
         return false;
     }
     if (enumeratedCount != cellCount) {
