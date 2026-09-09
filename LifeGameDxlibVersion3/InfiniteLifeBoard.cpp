@@ -60,12 +60,14 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
     const std::uint64_t cellMask = std::uint64_t{1} << lx;
     const std::uint64_t rowMask = std::uint64_t{1} << ly;
 
-    // Investigation trace: the observed failure occurs on negative 64-cell
-    // boundaries. Keep detailed information only for boundary coordinates so
-    // normal editing does not pay the cost of building this string every time.
     const bool traceBoundary = (x % ChunkSize == 0) || (y % ChunkSize == 0);
     std::ostringstream trace;
     const ChunkCoordHash hasher;
+
+    const auto coordDistanceAtMostTwo = [](Coord a, Coord b) noexcept {
+        if (a >= b) return static_cast<std::uint64_t>(a) - static_cast<std::uint64_t>(b) <= 2;
+        return static_cast<std::uint64_t>(b) - static_cast<std::uint64_t>(a) <= 2;
+    };
 
     const auto appendMapSnapshot = [&](const char* label) {
         if (!traceBoundary) return;
@@ -87,8 +89,8 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
         std::size_t printed = 0;
         for (const auto& [coord, chunk] : chunks_) {
             const bool near =
-                coord.x >= chunkCoord.x - 2 && coord.x <= chunkCoord.x + 2 &&
-                coord.y >= chunkCoord.y - 2 && coord.y <= chunkCoord.y + 2;
+                coordDistanceAtMostTwo(coord.x, chunkCoord.x) &&
+                coordDistanceAtMostTwo(coord.y, chunkCoord.y);
             if (!near && chunks_.size() > 32) continue;
             trace << " (" << coord.x << ',' << coord.y
                   << ",hash=" << hasher(coord)
