@@ -14,6 +14,43 @@ std::size_t mix64(std::uint64_t value) noexcept {
     value ^= value >> 33;
     return static_cast<std::size_t>(value);
 }
+
+struct SplitCoordinate {
+    InfiniteLifeBoard::Coord chunk = 0;
+    int local = 0;
+};
+
+constexpr SplitCoordinate splitCoordinate(InfiniteLifeBoard::Coord value) noexcept {
+    constexpr std::uint64_t ChunkSize = InfiniteLifeBoard::ChunkSize;
+    constexpr std::uint64_t ChunkMask = ChunkSize - 1;
+    static_assert((ChunkSize & ChunkMask) == 0, "ChunkSize must be a power of two");
+
+    const std::uint64_t bits = static_cast<std::uint64_t>(value);
+    const int local = static_cast<int>(bits & ChunkMask);
+
+    if (value >= 0) {
+        return {static_cast<InfiniteLifeBoard::Coord>(bits / ChunkSize), local};
+    }
+
+    // Convert the magnitude in unsigned arithmetic so INT64_MIN is safe.
+    // The ceil division gives floor(value / ChunkSize) for negative values.
+    const std::uint64_t magnitude = std::uint64_t{0} - bits;
+    const std::uint64_t chunkMagnitude = (magnitude + ChunkMask) / ChunkSize;
+    return {-static_cast<InfiniteLifeBoard::Coord>(chunkMagnitude), local};
+}
+
+static_assert(splitCoordinate(-129).chunk == -3 && splitCoordinate(-129).local == 63);
+static_assert(splitCoordinate(-128).chunk == -2 && splitCoordinate(-128).local == 0);
+static_assert(splitCoordinate(-127).chunk == -2 && splitCoordinate(-127).local == 1);
+static_assert(splitCoordinate(-65).chunk == -2 && splitCoordinate(-65).local == 63);
+static_assert(splitCoordinate(-64).chunk == -1 && splitCoordinate(-64).local == 0);
+static_assert(splitCoordinate(-63).chunk == -1 && splitCoordinate(-63).local == 1);
+static_assert(splitCoordinate(-1).chunk == -1 && splitCoordinate(-1).local == 63);
+static_assert(splitCoordinate(0).chunk == 0 && splitCoordinate(0).local == 0);
+static_assert(splitCoordinate(63).chunk == 0 && splitCoordinate(63).local == 63);
+static_assert(splitCoordinate(64).chunk == 1 && splitCoordinate(64).local == 0);
+static_assert(splitCoordinate(std::numeric_limits<InfiniteLifeBoard::Coord>::min()).local == 0);
+static_assert(splitCoordinate(std::numeric_limits<InfiniteLifeBoard::Coord>::max()).local == 63);
 }
 
 std::size_t InfiniteLifeBoard::ChunkCoordHash::operator()(const ChunkCoord& value) const noexcept {
@@ -23,6 +60,8 @@ std::size_t InfiniteLifeBoard::ChunkCoordHash::operator()(const ChunkCoord& valu
 }
 
 InfiniteLifeBoard::Coord InfiniteLifeBoard::floorDiv(Coord value, Coord divisor) noexcept {
+    if (divisor == ChunkSize) return splitCoordinate(value).chunk;
+
     Coord quotient = value / divisor;
     const Coord remainder = value % divisor;
     if (remainder < 0) --quotient;
@@ -30,33 +69,41 @@ InfiniteLifeBoard::Coord InfiniteLifeBoard::floorDiv(Coord value, Coord divisor)
 }
 
 int InfiniteLifeBoard::floorMod(Coord value, int divisor) noexcept {
+    if (divisor == ChunkSize) return splitCoordinate(value).local;
+
     Coord remainder = value % divisor;
     if (remainder < 0) remainder += divisor;
     return static_cast<int>(remainder);
 }
 
 InfiniteLifeBoard::ChunkCoord InfiniteLifeBoard::chunkCoordOf(Coord x, Coord y) noexcept {
-    return {floorDiv(x, ChunkSize), floorDiv(y, ChunkSize)};
+    const SplitCoordinate sx = splitCoordinate(x);
+    const SplitCoordinate sy = splitCoordinate(y);
+    return {sx.chunk, sy.chunk};
 }
 
-int InfiniteLifeBoard::localX(Coord x) noexcept { return floorMod(x, ChunkSize); }
-int InfiniteLifeBoard::localY(Coord y) noexcept { return floorMod(y, ChunkSize); }
+int InfiniteLifeBoard::localX(Coord x) noexcept { return splitCoordinate(x).local; }
+int InfiniteLifeBoard::localY(Coord y) noexcept { return splitCoordinate(y).local; }
 
 bool InfiniteLifeBoard::isAlive(Coord x, Coord y) const noexcept {
-    const ChunkCoord chunkCoord = chunkCoordOf(x, y);
+    const SplitCoordinate sx = splitCoordinate(x);
+    const SplitCoordinate sy = splitCoordinate(y);
+    const ChunkCoord chunkCoord{sx.chunk, sy.chunk};
     const auto it = chunks_.find(chunkCoord);
     if (it == chunks_.end()) return false;
-    const std::uint64_t mask = std::uint64_t{1} << localX(x);
-    return (it->second.rows[localY(y)] & mask) != 0;
+    const std::uint64_t mask = std::uint64_t{1} << sx.local;
+    return (it->second.rows[sy.local] & mask) != 0;
 }
 
 void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
     constexpr std::uint64_t WestEdgeMask = 1ULL;
     constexpr std::uint64_t EastEdgeMask = 1ULL << (ChunkSize - 1);
 
-    const ChunkCoord chunkCoord = chunkCoordOf(x, y);
-    const int lx = localX(x);
-    const int ly = localY(y);
+    const SplitCoordinate sx = splitCoordinate(x);
+    const SplitCoordinate sy = splitCoordinate(y);
+    const ChunkCoord chunkCoord{sx.chunk, sy.chunk};
+    const int lx = sx.local;
+    const int ly = sy.local;
     const std::uint64_t cellMask = std::uint64_t{1} << lx;
     const std::uint64_t rowMask = std::uint64_t{1} << ly;
 
