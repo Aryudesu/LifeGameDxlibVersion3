@@ -60,20 +60,141 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
     const std::uint64_t cellMask = std::uint64_t{1} << lx;
     const std::uint64_t rowMask = std::uint64_t{1} << ly;
 
+    // Investigation trace: the observed failure occurs on negative 64-cell
+    // boundaries. Keep detailed information only for boundary coordinates so
+    // normal editing does not pay the cost of building this string every time.
+    const bool traceBoundary = (x % ChunkSize == 0) || (y % ChunkSize == 0);
+    std::ostringstream trace;
+    const ChunkCoordHash hasher;
+
+    const auto appendMapSnapshot = [&](const char* label) {
+        if (!traceBoundary) return;
+        trace << label
+              << " mapSize=" << chunks_.size()
+              << " bucketCount=" << chunks_.bucket_count()
+              << " loadFactor=" << chunks_.load_factor() << '\n';
+
+        const auto found = chunks_.find(chunkCoord);
+        trace << label << " findExpected=" << (found != chunks_.end() ? 1 : 0);
+        if (found != chunks_.end()) {
+            trace << " bucket=" << chunks_.bucket(chunkCoord)
+                  << " rowBits=" << found->second.rows[ly]
+                  << " cellBit=" << ((found->second.rows[ly] & cellMask) != 0 ? 1 : 0);
+        }
+        trace << '\n';
+
+        trace << label << " keys:";
+        std::size_t printed = 0;
+        for (const auto& [coord, chunk] : chunks_) {
+            const bool near =
+                coord.x >= chunkCoord.x - 2 && coord.x <= chunkCoord.x + 2 &&
+                coord.y >= chunkCoord.y - 2 && coord.y <= chunkCoord.y + 2;
+            if (!near && chunks_.size() > 32) continue;
+            trace << " (" << coord.x << ',' << coord.y
+                  << ",hash=" << hasher(coord)
+                  << ",bucket=" << chunks_.bucket(coord)
+                  << ",sameLocalBit=" << ((chunk.rows[ly] & cellMask) != 0 ? 1 : 0)
+                  << ')';
+            if (++printed >= 64) {
+                trace << " ...";
+                break;
+            }
+        }
+        if (printed == 0) trace << " none";
+        trace << '\n';
+
+        trace << label << " linearEqualKeys:";
+        bool equalFound = false;
+        for (const auto& [coord, chunk] : chunks_) {
+            if (!(coord == chunkCoord)) continue;
+            equalFound = true;
+            trace << " (" << coord.x << ',' << coord.y
+                  << ",hash=" << hasher(coord)
+                  << ",cellBit=" << ((chunk.rows[ly] & cellMask) != 0 ? 1 : 0)
+                  << ')';
+        }
+        if (!equalFound) trace << " none";
+        trace << '\n';
+    };
+
+    if (traceBoundary) {
+        trace << "=== setAlive trace ===\n"
+              << "request x=" << x << " y=" << y << " alive=" << (alive ? 1 : 0) << '\n'
+              << "chunkCoord=(" << chunkCoord.x << ',' << chunkCoord.y << ')'
+              << " local=(" << lx << ',' << ly << ')'
+              << " hash=" << hasher(chunkCoord) << '\n'
+              << "rawDivMod x/64=" << (x / ChunkSize)
+              << " x%64=" << (x % ChunkSize)
+              << " y/64=" << (y / ChunkSize)
+              << " y%64=" << (y % ChunkSize) << '\n';
+        appendMapSnapshot("before");
+    }
+
     if (alive) {
+        const std::size_t sizeBefore = chunks_.size();
+        const std::size_t bucketCountBefore = chunks_.bucket_count();
         Chunk& chunk = chunks_[chunkCoord];
-        if ((chunk.rows[ly] & cellMask) == 0) {
+
+        if (traceBoundary) {
+            const ChunkCoord recomputed = chunkCoordOf(x, y);
+            trace << "afterOperatorBracket"
+                  << " sizeBefore=" << sizeBefore
+                  << " sizeAfter=" << chunks_.size()
+                  << " bucketCountBefore=" << bucketCountBefore
+                  << " bucketCountAfter=" << chunks_.bucket_count()
+                  << " originalChunk=(" << chunkCoord.x << ',' << chunkCoord.y << ')'
+                  << " recomputedChunk=(" << recomputed.x << ',' << recomputed.y << ')'
+                  << " originalEqualsRecomputed=" << (chunkCoord == recomputed ? 1 : 0)
+                  << '\n';
+
+            bool referencedChunkFound = false;
+            trace << "operatorBracketReturnedChunkKey:";
+            for (const auto& [coord, candidate] : chunks_) {
+                if (&candidate != &chunk) continue;
+                referencedChunkFound = true;
+                trace << " (" << coord.x << ',' << coord.y
+                      << ",hash=" << hasher(coord)
+                      << ",bucket=" << chunks_.bucket(coord) << ')';
+            }
+            if (!referencedChunkFound) trace << " none";
+            trace << '\n';
+            appendMapSnapshot("afterOperatorBracket");
+        }
+
+        const bool wasAlive = (chunk.rows[ly] & cellMask) != 0;
+        if (!wasAlive) {
             chunk.rows[ly] |= cellMask;
             chunk.nonEmptyRows |= rowMask;
             if (lx == 0) chunk.westEdgeRows |= rowMask;
             if (lx == ChunkSize - 1) chunk.eastEdgeRows |= rowMask;
             ++aliveCellCount_;
         }
+
+        if (traceBoundary) {
+            trace << "afterBitWrite wasAlive=" << (wasAlive ? 1 : 0)
+                  << " referencedRowBits=" << chunk.rows[ly]
+                  << " referencedCellBit=" << ((chunk.rows[ly] & cellMask) != 0 ? 1 : 0)
+                  << " aliveCellCount=" << aliveCellCount_ << '\n';
+            appendMapSnapshot("afterBitWrite");
+            trace << "isAliveRequested=" << (isAlive(x, y) ? 1 : 0) << '\n'
+                  << "=== end setAlive trace ===\n";
+            lastSetAliveTrace_ = trace.str();
+        } else {
+            lastSetAliveTrace_.clear();
+        }
         return;
     }
 
     const auto it = chunks_.find(chunkCoord);
-    if (it == chunks_.end() || (it->second.rows[ly] & cellMask) == 0) return;
+    if (it == chunks_.end() || (it->second.rows[ly] & cellMask) == 0) {
+        if (traceBoundary) {
+            trace << "removalSkipped=1\n=== end setAlive trace ===\n";
+            lastSetAliveTrace_ = trace.str();
+        } else {
+            lastSetAliveTrace_.clear();
+        }
+        return;
+    }
 
     Chunk& chunk = it->second;
     chunk.rows[ly] &= ~cellMask;
@@ -82,11 +203,20 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
     if (lx == ChunkSize - 1 && (chunk.rows[ly] & EastEdgeMask) == 0) chunk.eastEdgeRows &= ~rowMask;
     --aliveCellCount_;
     if (chunk.empty()) chunks_.erase(it);
+
+    if (traceBoundary) {
+        appendMapSnapshot("afterRemoval");
+        trace << "=== end setAlive trace ===\n";
+        lastSetAliveTrace_ = trace.str();
+    } else {
+        lastSetAliveTrace_.clear();
+    }
 }
 
 void InfiniteLifeBoard::clear() noexcept {
     chunks_.clear();
     aliveCellCount_ = 0;
+    lastSetAliveTrace_.clear();
 }
 
 void InfiniteLifeBoard::forEachAliveCell(const std::function<void(Coord, Coord)>& visitor) const {
@@ -201,9 +331,6 @@ void InfiniteLifeBoard::step() {
         const Chunk* south = neighborhood[2][1];
         const Chunk* southEast = neighborhood[2][2];
 
-        // Track row occupancy and edge occupancy in each chunk so sparse chunks
-        // can skip untouched rows. A target row only needs work when a live
-        // source exists in that row or one of its two vertical neighbors.
         std::uint64_t sourceRows = center == nullptr ? 0 : center->nonEmptyRows;
         if (west != nullptr) sourceRows |= west->eastEdgeRows;
         if (east != nullptr) sourceRows |= east->westEdgeRows;
@@ -302,4 +429,5 @@ void InfiniteLifeBoard::step() {
 
     chunks_.swap(next.chunks_);
     aliveCellCount_ = nextAliveCellCount;
+    lastSetAliveTrace_.clear();
 }
