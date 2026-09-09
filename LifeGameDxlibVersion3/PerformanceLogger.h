@@ -9,6 +9,14 @@
 #include <sstream>
 #include <string>
 
+struct FramePerformanceMetrics {
+    double simulationMs = 0.0;
+    double boardRenderMs = 0.0;
+    double uiRenderMs = 0.0;
+    double frameWorkMs = 0.0;
+    std::uint64_t visibleAlive = 0;
+};
+
 class PerformanceLogger {
 public:
     PerformanceLogger() {
@@ -33,7 +41,8 @@ public:
             return;
         }
 
-        stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks\n";
+        stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,"
+                   "simulation_ms,board_render_ms,ui_render_ms,frame_work_ms,visible_alive\n";
         stream_.flush();
 
         const auto start = Clock::now();
@@ -46,7 +55,8 @@ public:
                 std::uint64_t generation,
                 std::uint64_t alive,
                 std::size_t chunks,
-                bool paused) {
+                bool paused,
+                const FramePerformanceMetrics& metrics) {
         if (!stream_) return;
 
         const auto now = Clock::now();
@@ -76,7 +86,12 @@ public:
                 << actualGenPerSecond << ','
                 << fps << ','
                 << alive << ','
-                << chunks << '\n';
+                << chunks << ','
+                << metrics.simulationMs << ','
+                << metrics.boardRenderMs << ','
+                << metrics.uiRenderMs << ','
+                << metrics.frameWorkMs << ','
+                << metrics.visibleAlive << '\n';
         stream_.flush();
 
         sampleStart_ = now;
