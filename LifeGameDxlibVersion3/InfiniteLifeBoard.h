@@ -21,9 +21,10 @@ public:
 
     void forEachAliveCell(const std::function<void(Coord, Coord)>& visitor) const;
 
-    // Investigation helper for the intermittent negative-coordinate chunk-boundary issue.
-    // This is intentionally verbose and should be removed once the root cause is fixed.
+    // Investigation helpers for the intermittent negative-coordinate
+    // chunk-boundary issue. Remove once the root cause is fixed.
     std::string debugCoordinateState(Coord x, Coord y) const;
+    const std::string& debugLastSetAliveTrace() const noexcept { return lastSetAliveTrace_; }
 
 private:
     struct ChunkCoord {
@@ -47,6 +48,7 @@ private:
 
     std::unordered_map<ChunkCoord, Chunk, ChunkCoordHash> chunks_;
     std::uint64_t aliveCellCount_ = 0;
+    std::string lastSetAliveTrace_;
 
     static Coord floorDiv(Coord value, Coord divisor) noexcept;
     static int floorMod(Coord value, int divisor) noexcept;
