@@ -84,6 +84,12 @@ void writeCoordinateDiagnostic(
            << "aliveCellCount=" << board.aliveCellCount() << '\n'
            << "chunkCount=" << board.chunkCount() << '\n'
            << board.debugCoordinateState(x, y)
+           << "--- LAST SETALIVE TRACE ---\n"
+           << board.debugLastSetAliveTrace();
+    if (board.debugLastSetAliveTrace().empty() || board.debugLastSetAliveTrace().back() != '\n') {
+        output << '\n';
+    }
+    output << "--- END LAST SETALIVE TRACE ---\n"
            << "=== END MISMATCH ===\n";
 }
 
