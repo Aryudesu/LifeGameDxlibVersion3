@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <fstream>
 #include <new>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <windows.h>
@@ -21,15 +22,11 @@ constexpr std::uint32_t FnvOffset = 2166136261u;
 constexpr std::uint32_t FnvPrime = 16777619u;
 
 void writeU32(std::ostream& output, std::uint32_t value) {
-    for (int i = 0; i < 4; ++i) {
-        output.put(static_cast<char>((value >> (i * 8)) & 0xff));
-    }
+    for (int i = 0; i < 4; ++i) output.put(static_cast<char>((value >> (i * 8)) & 0xff));
 }
 
 void writeU64(std::ostream& output, std::uint64_t value) {
-    for (int i = 0; i < 8; ++i) {
-        output.put(static_cast<char>((value >> (i * 8)) & 0xff));
-    }
+    for (int i = 0; i < 8; ++i) output.put(static_cast<char>((value >> (i * 8)) & 0xff));
 }
 
 bool readU32(std::istream& input, std::uint32_t& value) {
@@ -58,9 +55,42 @@ void checksumByte(std::uint32_t& hash, std::uint8_t byte) noexcept {
 }
 
 void checksumU64(std::uint32_t& hash, std::uint64_t value) noexcept {
-    for (int i = 0; i < 8; ++i) {
-        checksumByte(hash, static_cast<std::uint8_t>((value >> (i * 8)) & 0xff));
+    for (int i = 0; i < 8; ++i) checksumByte(hash, static_cast<std::uint8_t>((value >> (i * 8)) & 0xff));
+}
+
+std::string coordinateError(const char* phase, std::uint64_t index, InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+    std::ostringstream stream;
+    stream << "Internal board coordinate mismatch during " << phase
+           << " at cell #" << index << " (x=" << x << ", y=" << y << ").";
+    return stream.str();
+}
+
+void writeCoordinateDiagnostic(
+    const std::string& savePath,
+    const char* phase,
+    std::uint64_t index,
+    InfiniteLifeBoard::Coord x,
+    InfiniteLifeBoard::Coord y,
+    const InfiniteLifeBoard& board) {
+    const std::string diagnosticPath = savePath + ".diagnostic.log";
+    std::ofstream output(diagnosticPath, std::ios::app);
+    if (!output) return;
+
+    output << "=== COORDINATE MISMATCH ===\n"
+           << "phase=" << phase << '\n'
+           << "cellIndex=" << index << '\n'
+           << "requestedX=" << x << '\n'
+           << "requestedY=" << y << '\n'
+           << "aliveCellCount=" << board.aliveCellCount() << '\n'
+           << "chunkCount=" << board.chunkCount() << '\n'
+           << board.debugCoordinateState(x, y)
+           << "--- LAST SETALIVE TRACE ---\n"
+           << board.debugLastSetAliveTrace();
+    if (board.debugLastSetAliveTrace().empty() || board.debugLastSetAliveTrace().back() != '\n') {
+        output << '\n';
     }
+    output << "--- END LAST SETALIVE TRACE ---\n"
+           << "=== END MISMATCH ===\n";
 }
 
 std::uint32_t calculateChecksum(const InfiniteLifeBoard& board, std::uint64_t generation) {
@@ -75,24 +105,42 @@ std::uint32_t calculateChecksum(const InfiniteLifeBoard& board, std::uint64_t ge
 }
 
 bool replaceFile(const std::string& temporaryPath, const std::string& destinationPath) {
-    return MoveFileExA(
-        temporaryPath.c_str(),
-        destinationPath.c_str(),
-        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    return MoveFileExA(temporaryPath.c_str(), destinationPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 }
 } // namespace
 
 namespace InfiniteLifeFile {
-bool save(
-    const InfiniteLifeBoard& board,
-    std::uint64_t generation,
-    const std::string& path,
-    std::string& errorMessage) {
+bool save(const InfiniteLifeBoard& board, std::uint64_t generation, const std::string& path, std::string& errorMessage) {
     errorMessage.clear();
-
     const std::uint64_t cellCount = board.aliveCellCount();
     if (cellCount > MaxCellCount) {
         errorMessage = "The board is too large to save in this format.";
+        return false;
+    }
+
+    bool boardConsistent = true;
+    std::uint64_t checkedIndex = 0;
+    InfiniteLifeBoard::Coord badX = 0;
+    InfiniteLifeBoard::Coord badY = 0;
+    board.forEachAliveCell([&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+        if (boardConsistent && !board.isAlive(x, y)) {
+            boardConsistent = false;
+            badX = x;
+            badY = y;
+        }
+        ++checkedIndex;
+    });
+    if (!boardConsistent) {
+        writeCoordinateDiagnostic(path, "save validation", checkedIndex, badX, badY, board);
+        errorMessage = coordinateError("save validation", checkedIndex, badX, badY) +
+            " Diagnostic: " + path + ".diagnostic.log";
+        return false;
+    }
+    if (checkedIndex != cellCount) {
+        std::ostringstream stream;
+        stream << "Internal board cell-count mismatch during save validation (counter="
+               << cellCount << ", enumerated=" << checkedIndex << ").";
+        errorMessage = stream.str();
         return false;
     }
 
@@ -122,24 +170,17 @@ bool save(
         errorMessage = "Failed while writing the save file.";
         return false;
     }
-
     output.close();
     if (!replaceFile(temporaryPath, path)) {
         DeleteFileA(temporaryPath.c_str());
         errorMessage = "Could not replace the destination save file.";
         return false;
     }
-
     return true;
 }
 
-bool load(
-    InfiniteLifeBoard& board,
-    std::uint64_t& generation,
-    const std::string& path,
-    std::string& errorMessage) {
+bool load(InfiniteLifeBoard& board, std::uint64_t& generation, const std::string& path, std::string& errorMessage) {
     errorMessage.clear();
-
     std::ifstream input(path, std::ios::binary);
     if (!input) {
         errorMessage = "Could not open the save file.";
@@ -157,14 +198,10 @@ bool load(
     std::uint64_t loadedGeneration = 0;
     std::uint64_t cellCount = 0;
     std::uint32_t storedChecksum = 0;
-    if (!readU32(input, version) ||
-        !readU64(input, loadedGeneration) ||
-        !readU64(input, cellCount) ||
-        !readU32(input, storedChecksum)) {
+    if (!readU32(input, version) || !readU64(input, loadedGeneration) || !readU64(input, cellCount) || !readU32(input, storedChecksum)) {
         errorMessage = "The save file header is truncated.";
         return false;
     }
-
     if (version != FormatVersion) {
         errorMessage = "Unsupported save file version.";
         return false;
@@ -187,13 +224,19 @@ bool load(
                 errorMessage = "The save file data is truncated.";
                 return false;
             }
-
             checksumU64(calculatedChecksum, xBits);
             checksumU64(calculatedChecksum, yBits);
-            loadedBoard.setAlive(
-                std::bit_cast<InfiniteLifeBoard::Coord>(xBits),
-                std::bit_cast<InfiniteLifeBoard::Coord>(yBits),
-                true);
+
+            const auto x = std::bit_cast<InfiniteLifeBoard::Coord>(xBits);
+            const auto y = std::bit_cast<InfiniteLifeBoard::Coord>(yBits);
+            loadedBoard.setAlive(x, y, true);
+
+            if (!loadedBoard.isAlive(x, y)) {
+                writeCoordinateDiagnostic(path, "load insertion", i, x, y, loadedBoard);
+                errorMessage = coordinateError("load insertion", i, x, y) +
+                    " Diagnostic: " + path + ".diagnostic.log";
+                return false;
+            }
         }
     } catch (const std::bad_alloc&) {
         errorMessage = "Not enough memory to load the save file.";
@@ -210,6 +253,32 @@ bool load(
     }
     if (loadedBoard.aliveCellCount() != cellCount) {
         errorMessage = "The save file contains duplicate cell coordinates.";
+        return false;
+    }
+
+    std::uint64_t enumeratedCount = 0;
+    bool roundTripConsistent = true;
+    InfiniteLifeBoard::Coord badX = 0;
+    InfiniteLifeBoard::Coord badY = 0;
+    loadedBoard.forEachAliveCell([&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+        if (roundTripConsistent && !loadedBoard.isAlive(x, y)) {
+            roundTripConsistent = false;
+            badX = x;
+            badY = y;
+        }
+        ++enumeratedCount;
+    });
+    if (!roundTripConsistent) {
+        writeCoordinateDiagnostic(path, "load round-trip validation", enumeratedCount, badX, badY, loadedBoard);
+        errorMessage = coordinateError("load round-trip validation", enumeratedCount, badX, badY) +
+            " Diagnostic: " + path + ".diagnostic.log";
+        return false;
+    }
+    if (enumeratedCount != cellCount) {
+        std::ostringstream stream;
+        stream << "Internal board cell-count mismatch after load (header=" << cellCount
+               << ", enumerated=" << enumeratedCount << ").";
+        errorMessage = stream.str();
         return false;
     }
 

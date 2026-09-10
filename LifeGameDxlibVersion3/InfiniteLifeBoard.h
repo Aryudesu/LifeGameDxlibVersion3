@@ -3,6 +3,8 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <sstream>
+#include <string>
 #include <unordered_map>
 
 class InfiniteLifeBoard {
@@ -18,6 +20,11 @@ public:
     std::size_t chunkCount() const noexcept { return chunks_.size(); }
 
     void forEachAliveCell(const std::function<void(Coord, Coord)>& visitor) const;
+
+    // Investigation helpers for the intermittent negative-coordinate
+    // chunk-boundary issue. Remove once the root cause is fixed.
+    std::string debugCoordinateState(Coord x, Coord y) const;
+    const std::string& debugLastSetAliveTrace() const noexcept { return lastSetAliveTrace_; }
 
 private:
     struct ChunkCoord {
@@ -41,6 +48,7 @@ private:
 
     std::unordered_map<ChunkCoord, Chunk, ChunkCoordHash> chunks_;
     std::uint64_t aliveCellCount_ = 0;
+    std::string lastSetAliveTrace_;
 
     static Coord floorDiv(Coord value, Coord divisor) noexcept;
     static int floorMod(Coord value, int divisor) noexcept;
@@ -48,3 +56,52 @@ private:
     static int localX(Coord x) noexcept;
     static int localY(Coord y) noexcept;
 };
+
+inline std::string InfiniteLifeBoard::debugCoordinateState(Coord x, Coord y) const {
+    const ChunkCoord expectedChunk = chunkCoordOf(x, y);
+    const int lx = localX(x);
+    const int ly = localY(y);
+    const std::uint64_t cellMask = std::uint64_t{1} << lx;
+    const std::uint64_t rowMask = std::uint64_t{1} << ly;
+    const ChunkCoordHash hasher;
+
+    std::ostringstream stream;
+    stream << "input x=" << x << " y=" << y << '\n';
+    stream << "rawDivMod x/64=" << (x / ChunkSize)
+           << " x%64=" << (x % ChunkSize)
+           << " y/64=" << (y / ChunkSize)
+           << " y%64=" << (y % ChunkSize) << '\n';
+    stream << "expected chunk=(" << expectedChunk.x << ',' << expectedChunk.y << ")"
+           << " local=(" << lx << ',' << ly << ")"
+           << " hash=" << hasher(expectedChunk) << '\n';
+    stream << "map size=" << chunks_.size()
+           << " bucketCount=" << chunks_.bucket_count()
+           << " loadFactor=" << chunks_.load_factor() << '\n';
+
+    const auto expectedIt = chunks_.find(expectedChunk);
+    if (expectedIt == chunks_.end()) {
+        stream << "expectedChunkFound=0\n";
+    } else {
+        const Chunk& chunk = expectedIt->second;
+        stream << "expectedChunkFound=1"
+               << " bucket=" << chunks_.bucket(expectedChunk)
+               << " rowBits=" << chunk.rows[ly]
+               << " cellBit=" << ((chunk.rows[ly] & cellMask) != 0 ? 1 : 0)
+               << " nonEmptyRowBit=" << ((chunk.nonEmptyRows & rowMask) != 0 ? 1 : 0)
+               << " westEdgeRowBit=" << ((chunk.westEdgeRows & rowMask) != 0 ? 1 : 0)
+               << " eastEdgeRowBit=" << ((chunk.eastEdgeRows & rowMask) != 0 ? 1 : 0)
+               << '\n';
+    }
+
+    stream << "chunksContainingSameLocalBit:";
+    bool foundAny = false;
+    for (const auto& [coord, chunk] : chunks_) {
+        if ((chunk.rows[ly] & cellMask) == 0) continue;
+        foundAny = true;
+        stream << " (" << coord.x << ',' << coord.y << ')';
+    }
+    if (!foundAny) stream << " none";
+    stream << '\n';
+
+    return stream.str();
+}
