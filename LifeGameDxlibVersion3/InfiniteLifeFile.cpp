@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <fstream>
 #include <new>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <windows.h>
@@ -79,6 +80,41 @@ bool replaceFile(const std::string& temporaryPath, const std::string& destinatio
         temporaryPath.c_str(),
         destinationPath.c_str(),
         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+}
+
+std::string diagnosticPathFor(const std::string& savePath) {
+    return savePath + ".diagnostic.log";
+}
+
+void writeLoadDiagnostic(
+    const std::string& savePath,
+    const char* phase,
+    std::uint64_t cellIndex,
+    InfiniteLifeBoard::Coord x,
+    InfiniteLifeBoard::Coord y,
+    std::uint64_t expectedCellCount,
+    const InfiniteLifeBoard& board) {
+    std::ofstream output(diagnosticPathFor(savePath), std::ios::app);
+    if (!output) return;
+
+    output << "=== LOAD INTEGRITY ERROR ===\n"
+           << "phase=" << phase << '\n'
+           << "cellIndex=" << cellIndex << '\n'
+           << "requestedX=" << x << '\n'
+           << "requestedY=" << y << '\n'
+           << "expectedCellCount=" << expectedCellCount << '\n'
+           << "actualAliveCellCount=" << board.aliveCellCount() << '\n'
+           << "chunkCount=" << board.chunkCount() << '\n'
+           << "requestedCellAlive=" << (board.isAlive(x, y) ? 1 : 0) << '\n'
+           << "=== END LOAD INTEGRITY ERROR ===\n";
+}
+
+std::string loadIntegrityError(const char* phase, const std::string& savePath) {
+    std::ostringstream stream;
+    stream << "The loaded board failed an internal integrity check during " << phase
+           << ". The current board was not replaced. Diagnostic: "
+           << diagnosticPathFor(savePath);
+    return stream.str();
 }
 } // namespace
 
@@ -190,10 +226,16 @@ bool load(
 
             checksumU64(calculatedChecksum, xBits);
             checksumU64(calculatedChecksum, yBits);
-            loadedBoard.setAlive(
-                std::bit_cast<InfiniteLifeBoard::Coord>(xBits),
-                std::bit_cast<InfiniteLifeBoard::Coord>(yBits),
-                true);
+
+            const auto x = std::bit_cast<InfiniteLifeBoard::Coord>(xBits);
+            const auto y = std::bit_cast<InfiniteLifeBoard::Coord>(yBits);
+            loadedBoard.setAlive(x, y, true);
+
+            if (!loadedBoard.isAlive(x, y)) {
+                writeLoadDiagnostic(path, "cell insertion", i, x, y, cellCount, loadedBoard);
+                errorMessage = loadIntegrityError("cell insertion", path);
+                return false;
+            }
         }
     } catch (const std::bad_alloc&) {
         errorMessage = "Not enough memory to load the save file.";
@@ -210,6 +252,30 @@ bool load(
     }
     if (loadedBoard.aliveCellCount() != cellCount) {
         errorMessage = "The save file contains duplicate cell coordinates.";
+        return false;
+    }
+
+    std::uint64_t enumeratedCount = 0;
+    bool boardConsistent = true;
+    InfiniteLifeBoard::Coord badX = 0;
+    InfiniteLifeBoard::Coord badY = 0;
+    loadedBoard.forEachAliveCell([&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+        if (boardConsistent && !loadedBoard.isAlive(x, y)) {
+            boardConsistent = false;
+            badX = x;
+            badY = y;
+        }
+        ++enumeratedCount;
+    });
+
+    if (!boardConsistent) {
+        writeLoadDiagnostic(path, "post-load validation", enumeratedCount, badX, badY, cellCount, loadedBoard);
+        errorMessage = loadIntegrityError("post-load validation", path);
+        return false;
+    }
+    if (enumeratedCount != cellCount) {
+        writeLoadDiagnostic(path, "cell-count validation", enumeratedCount, 0, 0, cellCount, loadedBoard);
+        errorMessage = loadIntegrityError("cell-count validation", path);
         return false;
     }
 
