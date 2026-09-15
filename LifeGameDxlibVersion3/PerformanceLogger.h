@@ -33,7 +33,8 @@ public:
             return;
         }
 
-        stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks\n";
+        stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,"
+                   "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct\n";
         stream_.flush();
 
         const auto start = Clock::now();
@@ -68,6 +69,14 @@ public:
         const double elapsedSeconds = std::chrono::duration<double>(now - runStart_).count();
         const std::uint64_t advancedGenerations = generation - sampleGeneration_;
         const double actualGenPerSecond = advancedGenerations / sampleSeconds;
+        const double frameMs = fps > 0.0 ? 1000.0 / fps : 0.0;
+        const double msPerGeneration = advancedGenerations > 0
+            ? sampleSeconds * 1000.0 / static_cast<double>(advancedGenerations)
+            : 0.0;
+        const double alivePerChunk = chunks > 0
+            ? static_cast<double>(alive) / static_cast<double>(chunks)
+            : 0.0;
+        const double frameBudgetUsagePercent = frameMs / TargetFrameMs * 100.0;
 
         stream_ << std::fixed << std::setprecision(3)
                 << elapsedSeconds << ','
@@ -76,7 +85,11 @@ public:
                 << actualGenPerSecond << ','
                 << fps << ','
                 << alive << ','
-                << chunks << '\n';
+                << chunks << ','
+                << frameMs << ','
+                << msPerGeneration << ','
+                << alivePerChunk << ','
+                << frameBudgetUsagePercent << '\n';
         stream_.flush();
 
         sampleStart_ = now;
@@ -89,6 +102,7 @@ public:
 private:
     using Clock = std::chrono::steady_clock;
     static constexpr double SampleIntervalSeconds = 1.0;
+    static constexpr double TargetFrameMs = 1000.0 / 60.0;
 
     void resetSample(Clock::time_point now, int targetGenPerSecond, std::uint64_t generation) noexcept {
         sampleStart_ = now;
