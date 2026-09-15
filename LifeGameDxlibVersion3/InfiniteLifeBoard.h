@@ -18,6 +18,12 @@ public:
     std::size_t chunkCount() const noexcept { return chunks_.size(); }
 
     void forEachAliveCell(const std::function<void(Coord, Coord)>& visitor) const;
+    void forEachAliveCellInRect(
+        Coord minX,
+        Coord minY,
+        Coord maxX,
+        Coord maxY,
+        const std::function<void(Coord, Coord)>& visitor) const;
 
 private:
     struct ChunkCoord {
