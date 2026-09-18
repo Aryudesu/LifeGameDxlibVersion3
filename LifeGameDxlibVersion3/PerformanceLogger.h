@@ -35,7 +35,8 @@ public:
 
         stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,"
                    "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct,"
-                   "step_ms_per_generation,step_ms_per_frame,board_render_ms_per_frame,work_ms_per_frame,generations_executed\n";
+                   "step_ms_per_generation,step_ms_per_frame,board_render_ms_per_frame,work_ms_per_frame,generations_executed,"
+                   "candidate_build_ms_per_generation,candidate_evaluate_ms_per_generation,candidates_per_generation,rows_evaluated_per_generation\n";
         stream_.flush();
 
         const auto start = Clock::now();
@@ -52,7 +53,11 @@ public:
                 double stepMs,
                 int generationsExecuted,
                 double boardRenderMs,
-                double workMs) {
+                double workMs,
+                double candidateBuildMs,
+                double candidateEvaluateMs,
+                std::uint64_t candidateCount,
+                std::uint64_t rowsEvaluated) {
         if (!stream_) return;
 
         const auto now = Clock::now();
@@ -72,6 +77,10 @@ public:
         sampleGenerationsExecuted_ += generationsExecuted;
         sampleBoardRenderMs_ += boardRenderMs;
         sampleWorkMs_ += workMs;
+        sampleCandidateBuildMs_ += candidateBuildMs;
+        sampleCandidateEvaluateMs_ += candidateEvaluateMs;
+        sampleCandidateCount_ += candidateCount;
+        sampleRowsEvaluated_ += rowsEvaluated;
         ++sampleFrameCount_;
 
         const double sampleSeconds = std::chrono::duration<double>(now - sampleStart_).count();
@@ -94,6 +103,14 @@ public:
         const double stepMsPerFrame = sampleFrameCount_ > 0 ? sampleStepMs_ / sampleFrameCount_ : 0.0;
         const double boardRenderMsPerFrame = sampleFrameCount_ > 0 ? sampleBoardRenderMs_ / sampleFrameCount_ : 0.0;
         const double workMsPerFrame = sampleFrameCount_ > 0 ? sampleWorkMs_ / sampleFrameCount_ : 0.0;
+        const double candidateBuildMsPerGeneration = sampleGenerationsExecuted_ > 0
+            ? sampleCandidateBuildMs_ / sampleGenerationsExecuted_ : 0.0;
+        const double candidateEvaluateMsPerGeneration = sampleGenerationsExecuted_ > 0
+            ? sampleCandidateEvaluateMs_ / sampleGenerationsExecuted_ : 0.0;
+        const double candidatesPerGeneration = sampleGenerationsExecuted_ > 0
+            ? static_cast<double>(sampleCandidateCount_) / sampleGenerationsExecuted_ : 0.0;
+        const double rowsEvaluatedPerGeneration = sampleGenerationsExecuted_ > 0
+            ? static_cast<double>(sampleRowsEvaluated_) / sampleGenerationsExecuted_ : 0.0;
 
         stream_ << std::fixed << std::setprecision(3)
                 << elapsedSeconds << ','
@@ -111,7 +128,11 @@ public:
                 << stepMsPerFrame << ','
                 << boardRenderMsPerFrame << ','
                 << workMsPerFrame << ','
-                << sampleGenerationsExecuted_ << '\n';
+                << sampleGenerationsExecuted_ << ','
+                << candidateBuildMsPerGeneration << ','
+                << candidateEvaluateMsPerGeneration << ','
+                << candidatesPerGeneration << ','
+                << rowsEvaluatedPerGeneration << '\n';
         stream_.flush();
 
         sampleStart_ = now;
@@ -138,6 +159,10 @@ private:
         sampleStepMs_ = 0.0;
         sampleBoardRenderMs_ = 0.0;
         sampleWorkMs_ = 0.0;
+        sampleCandidateBuildMs_ = 0.0;
+        sampleCandidateEvaluateMs_ = 0.0;
+        sampleCandidateCount_ = 0;
+        sampleRowsEvaluated_ = 0;
         sampleGenerationsExecuted_ = 0;
         sampleFrameCount_ = 0;
     }
@@ -152,6 +177,10 @@ private:
     double sampleStepMs_ = 0.0;
     double sampleBoardRenderMs_ = 0.0;
     double sampleWorkMs_ = 0.0;
+    double sampleCandidateBuildMs_ = 0.0;
+    double sampleCandidateEvaluateMs_ = 0.0;
+    std::uint64_t sampleCandidateCount_ = 0;
+    std::uint64_t sampleRowsEvaluated_ = 0;
     std::uint64_t sampleGenerationsExecuted_ = 0;
     std::uint64_t sampleFrameCount_ = 0;
 };
