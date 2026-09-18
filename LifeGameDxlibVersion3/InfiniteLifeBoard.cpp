@@ -1,6 +1,7 @@
 #include "InfiniteLifeBoard.h"
 
 #include <bit>
+#include <chrono>
 #include <limits>
 #include <unordered_set>
 #include <utility>
@@ -155,7 +156,11 @@ void InfiniteLifeBoard::forEachAliveCell(const std::function<void(Coord, Coord)>
 }
 
 void InfiniteLifeBoard::step() {
+    using ProfileClock = std::chrono::steady_clock;
+    lastStepProfile_ = {};
     if (chunks_.empty()) return;
+
+    const auto candidateBuildStart = ProfileClock::now();
 
     constexpr Coord MinChunkCoord = std::numeric_limits<Coord>::min() / ChunkSize;
     constexpr Coord MaxChunkCoord = std::numeric_limits<Coord>::max() / ChunkSize;
@@ -208,6 +213,11 @@ void InfiniteLifeBoard::step() {
             addCandidate(coord.x + 1, coord.y + 1);
         }
     }
+
+    lastStepProfile_.candidateBuildMs =
+        std::chrono::duration<double, std::milli>(ProfileClock::now() - candidateBuildStart).count();
+    lastStepProfile_.candidateCount = candidates.size();
+    const auto candidateEvaluateStart = ProfileClock::now();
 
     InfiniteLifeBoard next;
     next.chunks_.reserve(candidates.size());
@@ -288,6 +298,7 @@ void InfiniteLifeBoard::step() {
 
         Chunk nextChunk;
         std::uint64_t pendingRows = rowsToUpdate;
+        lastStepProfile_.rowsEvaluated += static_cast<std::uint64_t>(std::popcount(pendingRows));
         while (pendingRows != 0) {
             const int y = std::countr_zero(pendingRows);
             const std::uint64_t rowMask = std::uint64_t{1} << y;
@@ -346,6 +357,9 @@ void InfiniteLifeBoard::step() {
             next.chunks_.emplace(coord, std::move(nextChunk));
         }
     }
+
+    lastStepProfile_.candidateEvaluateMs =
+        std::chrono::duration<double, std::milli>(ProfileClock::now() - candidateEvaluateStart).count();
 
     chunks_.swap(next.chunks_);
     aliveCellCount_ = nextAliveCellCount;
