@@ -482,6 +482,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         double candidateEvaluateMs = 0.0;
         std::uint64_t candidateCount = 0;
         std::uint64_t rowsEvaluated = 0;
+        double neighborhoodLookupEstimatedMs = 0.0;
+        std::uint64_t lookupSamples = 0;
         int generationsExecuted = 0;
         if (paused) {
             simulationAccumulator = 0.0;
@@ -496,6 +498,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 candidateEvaluateMs += board.lastStepProfile().candidateEvaluateMs;
                 candidateCount += board.lastStepProfile().candidateCount;
                 rowsEvaluated += board.lastStepProfile().rowsEvaluated;
+                neighborhoodLookupEstimatedMs += board.lastStepProfile().neighborhoodLookupEstimatedMs;
+                lookupSamples += board.lastStepProfile().neighborhoodLookupSamples;
                 stepMs = std::chrono::duration<double, std::milli>(Clock::now() - stepStart).count();
                 generationsExecuted = 1;
                 ++generation;
@@ -664,7 +668,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
                                  board.aliveCellCount(), board.chunkCount(), paused,
                                  stepMs, generationsExecuted, boardRenderMs, workMs,
-                                 candidateBuildMs, candidateEvaluateMs, candidateCount, rowsEvaluated);
+                                 candidateBuildMs, candidateEvaluateMs, candidateCount, rowsEvaluated,
+                                 neighborhoodLookupEstimatedMs, lookupSamples);
 
         previousEnter = enter;
         previousSpace = space;
