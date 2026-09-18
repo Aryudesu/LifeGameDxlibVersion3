@@ -477,6 +477,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             shapeDragActive = false;
         }
 
+        double stepMs = 0.0;
+        int generationsExecuted = 0;
         if (paused) {
             simulationAccumulator = 0.0;
             if (space && !previousSpace) {
@@ -484,7 +486,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
+                const auto stepStart = Clock::now();
                 board.step();
+                stepMs = std::chrono::duration<double, std::milli>(Clock::now() - stepStart).count();
+                generationsExecuted = 1;
                 ++generation;
             }
         } else {
@@ -497,10 +502,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
+                const auto stepStart = Clock::now();
+                for (int i = 0; i < generationsToAdvance; ++i) {
+                    board.step();
+                    ++generation;
+                }
+                stepMs = std::chrono::duration<double, std::milli>(Clock::now() - stepStart).count();
+                generationsExecuted = generationsToAdvance;
             }
-            for (int i = 0; i < generationsToAdvance; ++i) { board.step(); ++generation; }
         }
 
+        const auto boardRenderStart = Clock::now();
         ClearDrawScreen();
         const unsigned int aliveColor = GetColor(0, 255, 0);
         const auto [minVisibleX, minVisibleY] = camera.screenToBoard(0, 0);
@@ -518,6 +530,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 else DrawBox(sx, sy, sx + cellSize - 1, sy + cellSize - 1, aliveColor, TRUE);
             });
         if (showGrid) drawGrid(camera);
+        const double boardRenderMs =
+            std::chrono::duration<double, std::milli>(Clock::now() - boardRenderStart).count();
 
         if (paused && shapeDragActive && selectedPatternIndex == 0 && shapeTool != ShapeDrawing::Tool::Cell) {
             ShapeDrawing::drawPreview(shapeTool, camera, shapeStartX, shapeStartY, shapeEndX, shapeEndY,
@@ -633,8 +647,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             fpsSampleStart = fpsSampleEnd;
         }
 
+        const double workMs =
+            std::chrono::duration<double, std::milli>(Clock::now() - frameStart).count();
         performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
-                                 board.aliveCellCount(), board.chunkCount(), paused);
+                                 board.aliveCellCount(), board.chunkCount(), paused,
+                                 stepMs, generationsExecuted, boardRenderMs, workMs);
 
         previousEnter = enter;
         previousSpace = space;
