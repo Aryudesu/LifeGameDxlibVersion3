@@ -503,13 +503,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         ClearDrawScreen();
         const unsigned int aliveColor = GetColor(0, 255, 0);
-        board.forEachAliveCell([&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
-            const auto [sx, sy] = camera.boardToScreen(x, y);
-            const int size = camera.cellSize();
-            if (sx + size <= 0 || sy + size <= 0 || sx >= BoardViewWidth || sy >= ScreenHeight) return;
-            if (size == 1) DrawPixel(sx, sy, aliveColor);
-            else DrawBox(sx, sy, sx + size - 1, sy + size - 1, aliveColor, TRUE);
-        });
+        const auto [minVisibleX, minVisibleY] = camera.screenToBoard(0, 0);
+        const auto [maxVisibleX, maxVisibleY] = camera.screenToBoard(BoardViewWidth, ScreenHeight);
+        const int cellSize = camera.cellSize();
+        board.forEachAliveCellInRect(
+            minVisibleX, minVisibleY, maxVisibleX, maxVisibleY,
+            [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+                const auto [sx, sy] = camera.boardToScreen(x, y);
+                if (sx + cellSize <= 0 || sy + cellSize <= 0 ||
+                    sx >= BoardViewWidth || sy >= ScreenHeight) {
+                    return;
+                }
+                if (cellSize == 1) DrawPixel(sx, sy, aliveColor);
+                else DrawBox(sx, sy, sx + cellSize - 1, sy + cellSize - 1, aliveColor, TRUE);
+            });
         if (showGrid) drawGrid(camera);
 
         if (paused && shapeDragActive && selectedPatternIndex == 0 && shapeTool != ShapeDrawing::Tool::Cell) {
