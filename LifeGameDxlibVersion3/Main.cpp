@@ -521,6 +521,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     candidateEvaluateMs += board.lastStepProfile().candidateEvaluateMs;
                     candidateCount += board.lastStepProfile().candidateCount;
                     rowsEvaluated += board.lastStepProfile().rowsEvaluated;
+                    neighborhoodLookupEstimatedMs += board.lastStepProfile().neighborhoodLookupEstimatedMs;
+                    lookupSamples += board.lastStepProfile().neighborhoodLookupSamples;
                     ++generation;
                 }
                 stepMs = std::chrono::duration<double, std::milli>(Clock::now() - stepStart).count();
