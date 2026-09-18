@@ -34,7 +34,10 @@ public:
         }
 
         stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,"
-                   "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct\n";
+                   "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct,"
+                   "step_ms_per_generation,step_ms_per_frame,board_render_ms_per_frame,work_ms_per_frame,generations_executed,"
+                   "candidate_build_ms_per_generation,candidate_evaluate_ms_per_generation,candidates_per_generation,rows_evaluated_per_generation,"
+                   "neighborhood_lookup_estimated_ms_per_generation,row_update_and_next_estimated_ms_per_generation,lookup_samples\n";
         stream_.flush();
 
         const auto start = Clock::now();
@@ -47,7 +50,17 @@ public:
                 std::uint64_t generation,
                 std::uint64_t alive,
                 std::size_t chunks,
-                bool paused) {
+                bool paused,
+                double stepMs,
+                int generationsExecuted,
+                double boardRenderMs,
+                double workMs,
+                double candidateBuildMs,
+                double candidateEvaluateMs,
+                std::uint64_t candidateCount,
+                std::uint64_t rowsEvaluated,
+                double neighborhoodLookupEstimatedMs,
+                std::uint64_t lookupSamples) {
         if (!stream_) return;
 
         const auto now = Clock::now();
@@ -63,6 +76,18 @@ public:
             return;
         }
 
+        sampleStepMs_ += stepMs;
+        sampleGenerationsExecuted_ += generationsExecuted;
+        sampleBoardRenderMs_ += boardRenderMs;
+        sampleWorkMs_ += workMs;
+        sampleCandidateBuildMs_ += candidateBuildMs;
+        sampleCandidateEvaluateMs_ += candidateEvaluateMs;
+        sampleCandidateCount_ += candidateCount;
+        sampleRowsEvaluated_ += rowsEvaluated;
+        sampleNeighborhoodLookupEstimatedMs_ += neighborhoodLookupEstimatedMs;
+        sampleLookupSamples_ += lookupSamples;
+        ++sampleFrameCount_;
+
         const double sampleSeconds = std::chrono::duration<double>(now - sampleStart_).count();
         if (sampleSeconds < SampleIntervalSeconds) return;
 
@@ -77,6 +102,26 @@ public:
             ? static_cast<double>(alive) / static_cast<double>(chunks)
             : 0.0;
         const double frameBudgetUsagePercent = frameMs / TargetFrameMs * 100.0;
+        const double directStepMsPerGeneration = sampleGenerationsExecuted_ > 0
+            ? sampleStepMs_ / static_cast<double>(sampleGenerationsExecuted_)
+            : 0.0;
+        const double stepMsPerFrame = sampleFrameCount_ > 0 ? sampleStepMs_ / sampleFrameCount_ : 0.0;
+        const double boardRenderMsPerFrame = sampleFrameCount_ > 0 ? sampleBoardRenderMs_ / sampleFrameCount_ : 0.0;
+        const double workMsPerFrame = sampleFrameCount_ > 0 ? sampleWorkMs_ / sampleFrameCount_ : 0.0;
+        const double candidateBuildMsPerGeneration = sampleGenerationsExecuted_ > 0
+            ? sampleCandidateBuildMs_ / sampleGenerationsExecuted_ : 0.0;
+        const double candidateEvaluateMsPerGeneration = sampleGenerationsExecuted_ > 0
+            ? sampleCandidateEvaluateMs_ / sampleGenerationsExecuted_ : 0.0;
+        const double candidatesPerGeneration = sampleGenerationsExecuted_ > 0
+            ? static_cast<double>(sampleCandidateCount_) / sampleGenerationsExecuted_ : 0.0;
+        const double rowsEvaluatedPerGeneration = sampleGenerationsExecuted_ > 0
+            ? static_cast<double>(sampleRowsEvaluated_) / sampleGenerationsExecuted_ : 0.0;
+        const double neighborhoodLookupEstimatedMsPerGeneration = sampleGenerationsExecuted_ > 0
+            ? sampleNeighborhoodLookupEstimatedMs_ / sampleGenerationsExecuted_ : 0.0;
+        const double rowUpdateAndNextEstimatedMsPerGeneration =
+            candidateEvaluateMsPerGeneration > neighborhoodLookupEstimatedMsPerGeneration
+            ? candidateEvaluateMsPerGeneration - neighborhoodLookupEstimatedMsPerGeneration
+            : 0.0;
 
         stream_ << std::fixed << std::setprecision(3)
                 << elapsedSeconds << ','
@@ -89,11 +134,24 @@ public:
                 << frameMs << ','
                 << msPerGeneration << ','
                 << alivePerChunk << ','
-                << frameBudgetUsagePercent << '\n';
+                << frameBudgetUsagePercent << ','
+                << directStepMsPerGeneration << ','
+                << stepMsPerFrame << ','
+                << boardRenderMsPerFrame << ','
+                << workMsPerFrame << ','
+                << sampleGenerationsExecuted_ << ','
+                << candidateBuildMsPerGeneration << ','
+                << candidateEvaluateMsPerGeneration << ','
+                << candidatesPerGeneration << ','
+                << rowsEvaluatedPerGeneration << ','
+                << neighborhoodLookupEstimatedMsPerGeneration << ','
+                << rowUpdateAndNextEstimatedMsPerGeneration << ','
+                << sampleLookupSamples_ << '\n';
         stream_.flush();
 
         sampleStart_ = now;
         sampleGeneration_ = generation;
+        resetAccumulators();
     }
 
     const std::string& path() const noexcept { return path_; }
@@ -108,6 +166,21 @@ private:
         sampleStart_ = now;
         sampleGeneration_ = generation;
         sampleTargetGenPerSecond_ = targetGenPerSecond;
+        resetAccumulators();
+    }
+
+    void resetAccumulators() noexcept {
+        sampleStepMs_ = 0.0;
+        sampleBoardRenderMs_ = 0.0;
+        sampleWorkMs_ = 0.0;
+        sampleCandidateBuildMs_ = 0.0;
+        sampleCandidateEvaluateMs_ = 0.0;
+        sampleCandidateCount_ = 0;
+        sampleRowsEvaluated_ = 0;
+        sampleNeighborhoodLookupEstimatedMs_ = 0.0;
+        sampleLookupSamples_ = 0;
+        sampleGenerationsExecuted_ = 0;
+        sampleFrameCount_ = 0;
     }
 
     std::ofstream stream_;
@@ -117,4 +190,15 @@ private:
     std::uint64_t sampleGeneration_ = 0;
     int sampleTargetGenPerSecond_ = 0;
     bool sampleInitialized_ = false;
+    double sampleStepMs_ = 0.0;
+    double sampleBoardRenderMs_ = 0.0;
+    double sampleWorkMs_ = 0.0;
+    double sampleCandidateBuildMs_ = 0.0;
+    double sampleCandidateEvaluateMs_ = 0.0;
+    std::uint64_t sampleCandidateCount_ = 0;
+    std::uint64_t sampleRowsEvaluated_ = 0;
+    double sampleNeighborhoodLookupEstimatedMs_ = 0.0;
+    std::uint64_t sampleLookupSamples_ = 0;
+    std::uint64_t sampleGenerationsExecuted_ = 0;
+    std::uint64_t sampleFrameCount_ = 0;
 };

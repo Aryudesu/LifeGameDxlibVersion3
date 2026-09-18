@@ -14,7 +14,18 @@ public:
     bool isAlive(Coord x, Coord y) const noexcept;
     void setAlive(Coord x, Coord y, bool alive);
     void clear() noexcept;
+
+    struct StepProfile {
+        double candidateBuildMs = 0.0;
+        double candidateEvaluateMs = 0.0;
+        double neighborhoodLookupEstimatedMs = 0.0;
+        std::size_t candidateCount = 0;
+        std::size_t neighborhoodLookupSamples = 0;
+        std::uint64_t rowsEvaluated = 0;
+    };
+
     void step();
+    const StepProfile& lastStepProfile() const noexcept { return lastStepProfile_; }
     std::uint64_t aliveCellCount() const noexcept { return aliveCellCount_; }
     std::size_t chunkCount() const noexcept { return chunks_.size(); }
 
@@ -100,6 +111,7 @@ private:
 
     std::unordered_map<ChunkCoord, Chunk, ChunkCoordHash> chunks_;
     std::uint64_t aliveCellCount_ = 0;
+    StepProfile lastStepProfile_{};
 
     static Coord floorDiv(Coord value, Coord divisor) noexcept;
     static int floorMod(Coord value, int divisor) noexcept;

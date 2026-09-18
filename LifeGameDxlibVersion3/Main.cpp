@@ -477,6 +477,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             shapeDragActive = false;
         }
 
+        double stepMs = 0.0;
+        double candidateBuildMs = 0.0;
+        double candidateEvaluateMs = 0.0;
+        std::uint64_t candidateCount = 0;
+        std::uint64_t rowsEvaluated = 0;
+        double neighborhoodLookupEstimatedMs = 0.0;
+        std::uint64_t lookupSamples = 0;
+        int generationsExecuted = 0;
         if (paused) {
             simulationAccumulator = 0.0;
             if (space && !previousSpace) {
@@ -484,7 +492,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
+                const auto stepStart = Clock::now();
                 board.step();
+                candidateBuildMs += board.lastStepProfile().candidateBuildMs;
+                candidateEvaluateMs += board.lastStepProfile().candidateEvaluateMs;
+                candidateCount += board.lastStepProfile().candidateCount;
+                rowsEvaluated += board.lastStepProfile().rowsEvaluated;
+                neighborhoodLookupEstimatedMs += board.lastStepProfile().neighborhoodLookupEstimatedMs;
+                lookupSamples += board.lastStepProfile().neighborhoodLookupSamples;
+                stepMs = std::chrono::duration<double, std::milli>(Clock::now() - stepStart).count();
+                generationsExecuted = 1;
                 ++generation;
             }
         } else {
@@ -497,10 +514,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
+                const auto stepStart = Clock::now();
+                for (int i = 0; i < generationsToAdvance; ++i) {
+                    board.step();
+                    candidateBuildMs += board.lastStepProfile().candidateBuildMs;
+                    candidateEvaluateMs += board.lastStepProfile().candidateEvaluateMs;
+                    candidateCount += board.lastStepProfile().candidateCount;
+                    rowsEvaluated += board.lastStepProfile().rowsEvaluated;
+                    neighborhoodLookupEstimatedMs += board.lastStepProfile().neighborhoodLookupEstimatedMs;
+                    lookupSamples += board.lastStepProfile().neighborhoodLookupSamples;
+                    ++generation;
+                }
+                stepMs = std::chrono::duration<double, std::milli>(Clock::now() - stepStart).count();
+                generationsExecuted = generationsToAdvance;
             }
-            for (int i = 0; i < generationsToAdvance; ++i) { board.step(); ++generation; }
         }
 
+        const auto boardRenderStart = Clock::now();
         ClearDrawScreen();
         const unsigned int aliveColor = GetColor(0, 255, 0);
         const auto [minVisibleX, minVisibleY] = camera.screenToBoard(0, 0);
@@ -518,6 +548,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 else DrawBox(sx, sy, sx + cellSize - 1, sy + cellSize - 1, aliveColor, TRUE);
             });
         if (showGrid) drawGrid(camera);
+        const double boardRenderMs =
+            std::chrono::duration<double, std::milli>(Clock::now() - boardRenderStart).count();
 
         if (paused && shapeDragActive && selectedPatternIndex == 0 && shapeTool != ShapeDrawing::Tool::Cell) {
             ShapeDrawing::drawPreview(shapeTool, camera, shapeStartX, shapeStartY, shapeEndX, shapeEndY,
@@ -633,8 +665,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             fpsSampleStart = fpsSampleEnd;
         }
 
+        const double workMs =
+            std::chrono::duration<double, std::milli>(Clock::now() - frameStart).count();
         performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
-                                 board.aliveCellCount(), board.chunkCount(), paused);
+                                 board.aliveCellCount(), board.chunkCount(), paused,
+                                 stepMs, generationsExecuted, boardRenderMs, workMs,
+                                 candidateBuildMs, candidateEvaluateMs, candidateCount, rowsEvaluated,
+                                 neighborhoodLookupEstimatedMs, lookupSamples);
 
         previousEnter = enter;
         previousSpace = space;
