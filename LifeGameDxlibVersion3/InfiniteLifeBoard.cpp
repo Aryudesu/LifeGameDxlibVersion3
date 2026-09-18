@@ -54,9 +54,13 @@ static_assert(splitCoordinate(std::numeric_limits<InfiniteLifeBoard::Coord>::max
 }
 
 std::size_t InfiniteLifeBoard::ChunkCoordHash::operator()(const ChunkCoord& value) const noexcept {
-    const auto hx = mix64(static_cast<std::uint64_t>(value.x));
-    const auto hy = mix64(static_cast<std::uint64_t>(value.y));
-    return hx ^ (hy + 0x9e3779b97f4a7c15ULL + (hx << 6) + (hx >> 2));
+    // Chunk coordinates encountered by the Life simulation are normally well
+    // inside the 32-bit range. Fold x/y into one 64-bit value first and run
+    // the avalanche mixer once. Equality still compares both full 64-bit
+    // coordinates, so collisions only affect performance, never correctness.
+    const std::uint64_t x = static_cast<std::uint64_t>(value.x);
+    const std::uint64_t y = static_cast<std::uint64_t>(value.y);
+    return mix64(x ^ std::rotl(y, 32));
 }
 
 InfiniteLifeBoard::Coord InfiniteLifeBoard::floorDiv(Coord value, Coord divisor) noexcept {
