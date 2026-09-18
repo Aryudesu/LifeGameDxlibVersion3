@@ -232,8 +232,14 @@ void InfiniteLifeBoard::step() {
     };
 
     std::uint64_t nextAliveCellCount = 0;
+    constexpr std::size_t LookupSampleStride = 256;
+    double sampledLookupMs = 0.0;
+    std::size_t sampledLookupCandidates = 0;
+    std::size_t candidateIndex = 0;
 
     for (const ChunkCoord& coord : candidates) {
+        const bool sampleLookup = (candidateIndex++ % LookupSampleStride) == 0;
+        const auto lookupStart = sampleLookup ? ProfileClock::now() : ProfileClock::time_point{};
         const Chunk* neighborhood[3][3]{};
         for (int dy = -1; dy <= 1; ++dy) {
             for (int dx = -1; dx <= 1; ++dx) {
@@ -246,6 +252,12 @@ void InfiniteLifeBoard::step() {
                 if (xOutside || yOutside) continue;
                 neighborhood[dy + 1][dx + 1] = chunkAt(coord.x + dx, coord.y + dy);
             }
+        }
+
+        if (sampleLookup) {
+            sampledLookupMs +=
+                std::chrono::duration<double, std::milli>(ProfileClock::now() - lookupStart).count();
+            ++sampledLookupCandidates;
         }
 
         const Chunk* west = neighborhood[1][0];
@@ -360,6 +372,12 @@ void InfiniteLifeBoard::step() {
 
     lastStepProfile_.candidateEvaluateMs =
         std::chrono::duration<double, std::milli>(ProfileClock::now() - candidateEvaluateStart).count();
+    lastStepProfile_.neighborhoodLookupSamples = sampledLookupCandidates;
+    if (sampledLookupCandidates != 0) {
+        lastStepProfile_.neighborhoodLookupEstimatedMs =
+            sampledLookupMs * static_cast<double>(candidates.size()) /
+            static_cast<double>(sampledLookupCandidates);
+    }
 
     chunks_.swap(next.chunks_);
     aliveCellCount_ = nextAliveCellCount;
