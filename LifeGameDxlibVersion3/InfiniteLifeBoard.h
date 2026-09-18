@@ -18,7 +18,9 @@ public:
     struct StepProfile {
         double candidateBuildMs = 0.0;
         double candidateEvaluateMs = 0.0;
+        double neighborhoodLookupEstimatedMs = 0.0;
         std::size_t candidateCount = 0;
+        std::size_t neighborhoodLookupSamples = 0;
         std::uint64_t rowsEvaluated = 0;
     };
 
