@@ -4,6 +4,7 @@
 #include "InfiniteCamera.h"
 #include "InfiniteLifeBoard.h"
 #include "InfiniteLifeFile.h"
+#include "LifeStepSelfTest.h"
 #include "PatternLibrary.h"
 #include "PatternListScroll.h"
 #include "PatternPlacementPreview.h"
@@ -144,6 +145,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousQ = false;
     bool previousE = false;
     bool previousG = false;
+    bool previousF9 = false;
     bool previousSaveShortcut = false;
     bool previousLoadShortcut = false;
     bool previousUndoShortcut = false;
@@ -232,6 +234,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool q = CheckHitKey(KEY_INPUT_Q) != 0;
         const bool e = CheckHitKey(KEY_INPUT_E) != 0;
         const bool g = CheckHitKey(KEY_INPUT_G) != 0;
+        const bool f9 = CheckHitKey(KEY_INPUT_F9) != 0;
         const bool escape = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
         const bool ctrl = CheckHitKey(KEY_INPUT_LCONTROL) != 0 || CheckHitKey(KEY_INPUT_RCONTROL) != 0;
         const bool shift = CheckHitKey(KEY_INPUT_LSHIFT) != 0 || CheckHitKey(KEY_INPUT_RSHIFT) != 0;
@@ -257,6 +260,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             simulationAccumulator = 0.0;
         }
         if (g && !previousG) showGrid = !showGrid;
+        if (f9 && !previousF9) {
+            std::string report;
+            const bool passed = LifeStepSelfTest::run(report);
+            MessageBoxA(GetMainWindowHandle(), report.c_str(),
+                passed ? "Life step self-test: PASS" : "Life step self-test: FAILED",
+                MB_OK | (passed ? MB_ICONINFORMATION : MB_ICONERROR));
+            resetTimingAfterDialog();
+        }
         if (escape) {
             if (selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
             shapeDragActive = false;
@@ -645,6 +656,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousQ = q;
         previousE = e;
         previousG = g;
+        previousF9 = f9;
         previousSaveShortcut = saveShortcut;
         previousLoadShortcut = loadShortcut;
         previousUndoShortcut = undoShortcut;

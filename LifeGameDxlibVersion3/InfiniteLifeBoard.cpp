@@ -2,7 +2,7 @@
 
 #include <bit>
 #include <limits>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 
 namespace {
@@ -164,79 +164,65 @@ void InfiniteLifeBoard::step() {
     constexpr std::uint64_t NorthRowMask = 1ULL;
     constexpr std::uint64_t SouthRowMask = 1ULL << (ChunkSize - 1);
 
-    std::unordered_set<ChunkCoord, ChunkCoordHash> candidates;
+    struct CandidateNeighborhood {
+        const Chunk* chunks[3][3]{};
+    };
+
+    std::unordered_map<ChunkCoord, CandidateNeighborhood, ChunkCoordHash> candidates;
     candidates.reserve(chunks_.size() * 2 + 16);
 
-    const auto addCandidate = [&](Coord x, Coord y) {
+    const auto addCandidate = [&](Coord x, Coord y, const Chunk* source, int sourceDx, int sourceDy) {
         if (x < MinChunkCoord || x > MaxChunkCoord ||
             y < MinChunkCoord || y > MaxChunkCoord) {
             return;
         }
-        candidates.insert({x, y});
+        auto [it, inserted] = candidates.try_emplace(ChunkCoord{x, y});
+        it->second.chunks[sourceDy + 1][sourceDx + 1] = source;
     };
 
     for (const auto& [coord, chunk] : chunks_) {
-        addCandidate(coord.x, coord.y);
+        // Build each candidate's 3x3 neighborhood while discovering candidates.
+        // sourceDx/sourceDy are the source chunk's offsets from the candidate.
+        addCandidate(coord.x, coord.y, &chunk, 0, 0);
 
         if (chunk.westEdgeRows != 0 && coord.x > MinChunkCoord) {
-            addCandidate(coord.x - 1, coord.y);
+            addCandidate(coord.x - 1, coord.y, &chunk, 1, 0);
         }
         if (chunk.eastEdgeRows != 0 && coord.x < MaxChunkCoord) {
-            addCandidate(coord.x + 1, coord.y);
+            addCandidate(coord.x + 1, coord.y, &chunk, -1, 0);
         }
         if ((chunk.nonEmptyRows & NorthRowMask) != 0 && coord.y > MinChunkCoord) {
-            addCandidate(coord.x, coord.y - 1);
+            addCandidate(coord.x, coord.y - 1, &chunk, 0, 1);
         }
         if ((chunk.nonEmptyRows & SouthRowMask) != 0 && coord.y < MaxChunkCoord) {
-            addCandidate(coord.x, coord.y + 1);
+            addCandidate(coord.x, coord.y + 1, &chunk, 0, -1);
         }
 
         if ((chunk.westEdgeRows & NorthRowMask) != 0 &&
             coord.x > MinChunkCoord && coord.y > MinChunkCoord) {
-            addCandidate(coord.x - 1, coord.y - 1);
+            addCandidate(coord.x - 1, coord.y - 1, &chunk, 1, 1);
         }
         if ((chunk.eastEdgeRows & NorthRowMask) != 0 &&
             coord.x < MaxChunkCoord && coord.y > MinChunkCoord) {
-            addCandidate(coord.x + 1, coord.y - 1);
+            addCandidate(coord.x + 1, coord.y - 1, &chunk, -1, 1);
         }
         if ((chunk.westEdgeRows & SouthRowMask) != 0 &&
             coord.x > MinChunkCoord && coord.y < MaxChunkCoord) {
-            addCandidate(coord.x - 1, coord.y + 1);
+            addCandidate(coord.x - 1, coord.y + 1, &chunk, 1, -1);
         }
         if ((chunk.eastEdgeRows & SouthRowMask) != 0 &&
             coord.x < MaxChunkCoord && coord.y < MaxChunkCoord) {
-            addCandidate(coord.x + 1, coord.y + 1);
+            addCandidate(coord.x + 1, coord.y + 1, &chunk, -1, -1);
         }
     }
 
     InfiniteLifeBoard next;
     next.chunks_.reserve(candidates.size());
 
-    const auto chunkAt = [&](Coord x, Coord y) -> const Chunk* {
-        if (x < MinChunkCoord || x > MaxChunkCoord ||
-            y < MinChunkCoord || y > MaxChunkCoord) {
-            return nullptr;
-        }
-        const auto it = chunks_.find({x, y});
-        return it == chunks_.end() ? nullptr : &it->second;
-    };
-
     std::uint64_t nextAliveCellCount = 0;
 
-    for (const ChunkCoord& coord : candidates) {
-        const Chunk* neighborhood[3][3]{};
-        for (int dy = -1; dy <= 1; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                const bool xOutside =
-                    (dx < 0 && coord.x == MinChunkCoord) ||
-                    (dx > 0 && coord.x == MaxChunkCoord);
-                const bool yOutside =
-                    (dy < 0 && coord.y == MinChunkCoord) ||
-                    (dy > 0 && coord.y == MaxChunkCoord);
-                if (xOutside || yOutside) continue;
-                neighborhood[dy + 1][dx + 1] = chunkAt(coord.x + dx, coord.y + dy);
-            }
-        }
+    for (const auto& [coord, candidate] : candidates) {
+        const auto& neighborhood = candidate.chunks;
 
         const Chunk* west = neighborhood[1][0];
         const Chunk* center = neighborhood[1][1];
