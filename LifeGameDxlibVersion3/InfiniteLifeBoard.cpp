@@ -216,8 +216,10 @@ void InfiniteLifeBoard::step() {
         }
     }
 
-    InfiniteLifeBoard next;
-    next.chunks_.reserve(candidates.size());
+    // Reuse the bucket array allocated by the previous generation instead of
+    // constructing a fresh unordered_map every step.
+    nextChunks_.clear();
+    nextChunks_.reserve(candidates.size());
 
     std::uint64_t nextAliveCellCount = 0;
 
@@ -329,10 +331,10 @@ void InfiniteLifeBoard::step() {
         }
 
         if (!nextChunk.empty()) {
-            next.chunks_.emplace(coord, std::move(nextChunk));
+            nextChunks_.emplace(coord, std::move(nextChunk));
         }
     }
 
-    chunks_.swap(next.chunks_);
+    chunks_.swap(nextChunks_);
     aliveCellCount_ = nextAliveCellCount;
 }
