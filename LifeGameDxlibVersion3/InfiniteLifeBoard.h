@@ -98,7 +98,9 @@ private:
         bool empty() const noexcept { return nonEmptyRows == 0; }
     };
 
-    std::unordered_map<ChunkCoord, Chunk, ChunkCoordHash> chunks_;
+    using ChunkMap = std::unordered_map<ChunkCoord, Chunk, ChunkCoordHash>;
+    ChunkMap chunks_;
+    ChunkMap nextChunks_;
     std::uint64_t aliveCellCount_ = 0;
 
     static Coord floorDiv(Coord value, Coord divisor) noexcept;
