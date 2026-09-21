@@ -299,33 +299,45 @@ void InfiniteLifeBoard::step() {
             const std::uint64_t bottom = centerRows[rowIndex + 1];
             const std::uint64_t bottomEast = eastRows[rowIndex + 1];
 
-            const std::uint64_t neighborMasks[8] = {
-                (top << 1) | (topWest >> 63),
-                top,
-                (top >> 1) | ((topEast & WestEdgeMask) << 63),
-                (middle << 1) | (middleWest >> 63),
-                (middle >> 1) | ((middleEast & WestEdgeMask) << 63),
-                (bottom << 1) | (bottomWest >> 63),
-                bottom,
-                (bottom >> 1) | ((bottomEast & WestEdgeMask) << 63)
+            const std::uint64_t a = (top << 1) | (topWest >> 63);
+            const std::uint64_t b = top;
+            const std::uint64_t c = (top >> 1) | ((topEast & WestEdgeMask) << 63);
+            const std::uint64_t d = (middle << 1) | (middleWest >> 63);
+            const std::uint64_t e = (middle >> 1) | ((middleEast & WestEdgeMask) << 63);
+            const std::uint64_t f = (bottom << 1) | (bottomWest >> 63);
+            const std::uint64_t g = bottom;
+            const std::uint64_t h = (bottom >> 1) | ((bottomEast & WestEdgeMask) << 63);
+
+            // Carry-save adder tree: reduce 8 one-bit neighbor masks to the
+            // binary bitplanes of the population count with a shallow circuit.
+            const auto csa = [](std::uint64_t& carry, std::uint64_t& sum,
+                                std::uint64_t x, std::uint64_t y, std::uint64_t z) noexcept {
+                const std::uint64_t u = x ^ y;
+                sum = u ^ z;
+                carry = (x & y) | (u & z);
             };
 
-            std::uint64_t ones = 0;
-            std::uint64_t twos = 0;
-            std::uint64_t fours = 0;
-            std::uint64_t eights = 0;
-            for (const std::uint64_t mask : neighborMasks) {
-                const std::uint64_t carryToTwos = ones & mask;
-                ones ^= mask;
-                const std::uint64_t carryToFours = twos & carryToTwos;
-                twos ^= carryToTwos;
-                const std::uint64_t carryToEights = fours & carryToFours;
-                fours ^= carryToFours;
-                eights ^= carryToEights;
-            }
+            std::uint64_t onesAB, twosAB;
+            std::uint64_t onesCD, twosCD;
+            std::uint64_t onesEF, twosEF;
+            csa(twosAB, onesAB, a, b, c);
+            csa(twosCD, onesCD, d, e, f);
+            csa(twosEF, onesEF, g, h, 0);
 
-            const std::uint64_t exactlyTwo = ~eights & ~fours & twos & ~ones;
-            const std::uint64_t exactlyThree = ~eights & ~fours & twos & ones;
+            std::uint64_t twosFromOnes, ones;
+            csa(twosFromOnes, ones, onesAB, onesCD, onesEF);
+
+            const std::uint64_t twosXor = twosAB ^ twosCD;
+            const std::uint64_t twos = twosXor ^ twosEF ^ twosFromOnes;
+            const std::uint64_t fours =
+                (twosAB & twosCD) |
+                (twosEF & twosFromOnes) |
+                (twosXor & (twosEF ^ twosFromOnes));
+
+            // Counts 2 and 3 share bit1=1 and all higher bits=0.
+            const std::uint64_t lowCounts = twos & ~fours;
+            const std::uint64_t exactlyTwo = lowCounts & ~ones;
+            const std::uint64_t exactlyThree = lowCounts & ones;
             const std::uint64_t nextRow = exactlyThree | (middle & exactlyTwo);
 
             if (nextRow != 0) {
