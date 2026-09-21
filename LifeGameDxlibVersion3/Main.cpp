@@ -488,6 +488,29 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             shapeDragActive = false;
         }
 
+        double stepMs = 0.0;
+        double candidateBuildMs = 0.0;
+        double candidateEvaluateMs = 0.0;
+        double rowComputeEstimatedMs = 0.0;
+        double nextInsertEstimatedMs = 0.0;
+        std::uint64_t rowsEvaluated = 0;
+        std::uint64_t timingSamples = 0;
+        int generationsExecuted = 0;
+
+        const auto runProfiledStep = [&]() {
+            const auto stepStart = Clock::now();
+            board.step();
+            stepMs += std::chrono::duration<double, std::milli>(Clock::now() - stepStart).count();
+            const auto& profile = board.lastStepProfile();
+            candidateBuildMs += profile.candidateBuildMs;
+            candidateEvaluateMs += profile.candidateEvaluateMs;
+            rowComputeEstimatedMs += profile.rowComputeEstimatedMs;
+            nextInsertEstimatedMs += profile.nextInsertEstimatedMs;
+            rowsEvaluated += profile.rowsEvaluated;
+            timingSamples += profile.timingSamples;
+            ++generationsExecuted;
+        };
+
         if (paused) {
             simulationAccumulator = 0.0;
             if (space && !previousSpace) {
@@ -495,7 +518,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
-                board.step();
+                runProfiledStep();
                 ++generation;
             }
         } else {
@@ -509,7 +532,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
             }
-            for (int i = 0; i < generationsToAdvance; ++i) { board.step(); ++generation; }
+            for (int i = 0; i < generationsToAdvance; ++i) { runProfiledStep(); ++generation; }
         }
 
         ClearDrawScreen();
@@ -645,7 +668,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
 
         performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
-                                 board.aliveCellCount(), board.chunkCount(), paused);
+                                 board.aliveCellCount(), board.chunkCount(), paused,
+                                 stepMs, generationsExecuted, candidateBuildMs,
+                                 candidateEvaluateMs, rowComputeEstimatedMs,
+                                 nextInsertEstimatedMs, rowsEvaluated, timingSamples);
 
         previousEnter = enter;
         previousSpace = space;
