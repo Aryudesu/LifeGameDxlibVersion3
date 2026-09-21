@@ -133,6 +133,7 @@ void InfiniteLifeBoard::setAlive(Coord x, Coord y, bool alive) {
 
 void InfiniteLifeBoard::clear() noexcept {
     chunks_.clear();
+    nextChunks_.clear();
     aliveCellCount_ = 0;
 }
 
