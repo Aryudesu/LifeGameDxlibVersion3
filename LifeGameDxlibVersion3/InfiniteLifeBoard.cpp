@@ -4,6 +4,7 @@
 #include <limits>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace {
 std::size_t mix64(std::uint64_t value) noexcept {
@@ -168,16 +169,45 @@ void InfiniteLifeBoard::step() {
         const Chunk* chunks[3][3]{};
     };
 
-    std::unordered_map<ChunkCoord, CandidateNeighborhood, ChunkCoordHash> candidates;
-    candidates.reserve(chunks_.size() * 2 + 16);
+    struct CandidateSlot {
+        ChunkCoord coord{};
+        CandidateNeighborhood neighborhood{};
+        bool occupied = false;
+    };
+
+    // step() only needs a short-lived hash table, so use open addressing here
+    // instead of allocating one unordered_map node per candidate.
+    std::size_t candidateCapacity = 16;
+    const std::size_t desiredCapacity = chunks_.size() * 4 + 16;
+    while (candidateCapacity < desiredCapacity) candidateCapacity <<= 1;
+    std::vector<CandidateSlot> candidates(candidateCapacity);
+    const std::size_t candidateMask = candidateCapacity - 1;
+    std::size_t candidateCount = 0;
+    const ChunkCoordHash candidateHash{};
 
     const auto addCandidate = [&](Coord x, Coord y, const Chunk* source, int sourceDx, int sourceDy) {
         if (x < MinChunkCoord || x > MaxChunkCoord ||
             y < MinChunkCoord || y > MaxChunkCoord) {
             return;
         }
-        auto [it, inserted] = candidates.try_emplace(ChunkCoord{x, y});
-        it->second.chunks[sourceDy + 1][sourceDx + 1] = source;
+
+        const ChunkCoord coord{x, y};
+        std::size_t index = candidateHash(coord) & candidateMask;
+        while (true) {
+            CandidateSlot& slot = candidates[index];
+            if (!slot.occupied) {
+                slot.occupied = true;
+                slot.coord = coord;
+                ++candidateCount;
+                slot.neighborhood.chunks[sourceDy + 1][sourceDx + 1] = source;
+                return;
+            }
+            if (slot.coord == coord) {
+                slot.neighborhood.chunks[sourceDy + 1][sourceDx + 1] = source;
+                return;
+            }
+            index = (index + 1) & candidateMask;
+        }
     };
 
     for (const auto& [coord, chunk] : chunks_) {
@@ -217,12 +247,14 @@ void InfiniteLifeBoard::step() {
     }
 
     InfiniteLifeBoard next;
-    next.chunks_.reserve(candidates.size());
+    next.chunks_.reserve(candidateCount);
 
     std::uint64_t nextAliveCellCount = 0;
 
-    for (const auto& [coord, candidate] : candidates) {
-        const auto& neighborhood = candidate.chunks;
+    for (const CandidateSlot& slot : candidates) {
+        if (!slot.occupied) continue;
+        const ChunkCoord& coord = slot.coord;
+        const auto& neighborhood = slot.neighborhood.chunks;
 
         const Chunk* west = neighborhood[1][0];
         const Chunk* center = neighborhood[1][1];
