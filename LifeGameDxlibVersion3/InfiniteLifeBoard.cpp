@@ -257,36 +257,47 @@ void InfiniteLifeBoard::step() {
 
         if (rowsToUpdate == 0) continue;
 
-        const auto rowFrom = [&](int horizontalChunkOffset, int row) noexcept -> std::uint64_t {
-            int verticalChunkOffset = 0;
-            int localRow = row;
-            if (row < 0) {
-                verticalChunkOffset = -1;
-                localRow += ChunkSize;
-            } else if (row >= ChunkSize) {
-                verticalChunkOffset = 1;
-                localRow -= ChunkSize;
-            }
+        // Materialize the three horizontal source rows once per local row.
+        // The hot loop then reads top/middle/bottom triplets directly instead of
+        // resolving vertical chunk boundaries through rowFrom() nine times.
+        std::uint64_t westRows[ChunkSize + 2]{};
+        std::uint64_t centerRows[ChunkSize + 2]{};
+        std::uint64_t eastRows[ChunkSize + 2]{};
 
-            const Chunk* source = neighborhood[verticalChunkOffset + 1][horizontalChunkOffset + 1];
-            return source == nullptr ? 0 : source->rows[localRow];
-        };
+        westRows[0] = northWest == nullptr ? 0 : northWest->rows[ChunkSize - 1];
+        centerRows[0] = north == nullptr ? 0 : north->rows[ChunkSize - 1];
+        eastRows[0] = northEast == nullptr ? 0 : northEast->rows[ChunkSize - 1];
+
+        if (west != nullptr) {
+            for (int y = 0; y < ChunkSize; ++y) westRows[y + 1] = west->rows[y];
+        }
+        if (center != nullptr) {
+            for (int y = 0; y < ChunkSize; ++y) centerRows[y + 1] = center->rows[y];
+        }
+        if (east != nullptr) {
+            for (int y = 0; y < ChunkSize; ++y) eastRows[y + 1] = east->rows[y];
+        }
+
+        westRows[ChunkSize + 1] = southWest == nullptr ? 0 : southWest->rows[0];
+        centerRows[ChunkSize + 1] = south == nullptr ? 0 : south->rows[0];
+        eastRows[ChunkSize + 1] = southEast == nullptr ? 0 : southEast->rows[0];
 
         Chunk nextChunk;
         std::uint64_t pendingRows = rowsToUpdate;
         while (pendingRows != 0) {
             const int y = std::countr_zero(pendingRows);
             const std::uint64_t rowMask = std::uint64_t{1} << y;
+            const int rowIndex = y + 1;
 
-            const std::uint64_t topWest = rowFrom(-1, y - 1);
-            const std::uint64_t top = rowFrom(0, y - 1);
-            const std::uint64_t topEast = rowFrom(1, y - 1);
-            const std::uint64_t middleWest = rowFrom(-1, y);
-            const std::uint64_t middle = rowFrom(0, y);
-            const std::uint64_t middleEast = rowFrom(1, y);
-            const std::uint64_t bottomWest = rowFrom(-1, y + 1);
-            const std::uint64_t bottom = rowFrom(0, y + 1);
-            const std::uint64_t bottomEast = rowFrom(1, y + 1);
+            const std::uint64_t topWest = westRows[rowIndex - 1];
+            const std::uint64_t top = centerRows[rowIndex - 1];
+            const std::uint64_t topEast = eastRows[rowIndex - 1];
+            const std::uint64_t middleWest = westRows[rowIndex];
+            const std::uint64_t middle = centerRows[rowIndex];
+            const std::uint64_t middleEast = eastRows[rowIndex];
+            const std::uint64_t bottomWest = westRows[rowIndex + 1];
+            const std::uint64_t bottom = centerRows[rowIndex + 1];
+            const std::uint64_t bottomEast = eastRows[rowIndex + 1];
 
             const std::uint64_t neighborMasks[8] = {
                 (top << 1) | (topWest >> 63),
