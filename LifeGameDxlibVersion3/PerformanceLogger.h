@@ -75,6 +75,15 @@ public:
             return;
         }
 
+        accumulatedStepMs_ += stepMs;
+        accumulatedGenerationsExecuted_ += generationsExecuted;
+        accumulatedCandidateBuildMs_ += candidateBuildMs;
+        accumulatedCandidateEvaluateMs_ += candidateEvaluateMs;
+        accumulatedRowComputeEstimatedMs_ += rowComputeEstimatedMs;
+        accumulatedNextInsertEstimatedMs_ += nextInsertEstimatedMs;
+        accumulatedRowsEvaluated_ += rowsEvaluated;
+        accumulatedTimingSamples_ += timingSamples;
+
         const double sampleSeconds = std::chrono::duration<double>(now - sampleStart_).count();
         if (sampleSeconds < SampleIntervalSeconds) return;
 
@@ -89,15 +98,6 @@ public:
             ? static_cast<double>(alive) / static_cast<double>(chunks)
             : 0.0;
         const double frameBudgetUsagePercent = frameMs / TargetFrameMs * 100.0;
-
-        accumulatedStepMs_ += stepMs;
-        accumulatedGenerationsExecuted_ += generationsExecuted;
-        accumulatedCandidateBuildMs_ += candidateBuildMs;
-        accumulatedCandidateEvaluateMs_ += candidateEvaluateMs;
-        accumulatedRowComputeEstimatedMs_ += rowComputeEstimatedMs;
-        accumulatedNextInsertEstimatedMs_ += nextInsertEstimatedMs;
-        accumulatedRowsEvaluated_ += rowsEvaluated;
-        accumulatedTimingSamples_ += timingSamples;
 
         const double profiledGenerations = static_cast<double>(accumulatedGenerationsExecuted_);
         const double stepMsPerGeneration = profiledGenerations > 0 ? accumulatedStepMs_ / profiledGenerations : 0.0;
@@ -152,6 +152,14 @@ private:
         sampleStart_ = now;
         sampleGeneration_ = generation;
         sampleTargetGenPerSecond_ = targetGenPerSecond;
+        accumulatedStepMs_ = 0.0;
+        accumulatedGenerationsExecuted_ = 0;
+        accumulatedCandidateBuildMs_ = 0.0;
+        accumulatedCandidateEvaluateMs_ = 0.0;
+        accumulatedRowComputeEstimatedMs_ = 0.0;
+        accumulatedNextInsertEstimatedMs_ = 0.0;
+        accumulatedRowsEvaluated_ = 0;
+        accumulatedTimingSamples_ = 0;
     }
 
     std::ofstream stream_;
