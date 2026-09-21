@@ -257,30 +257,37 @@ void InfiniteLifeBoard::step() {
 
         if (rowsToUpdate == 0) continue;
 
-        // Materialize the three horizontal source rows once per local row.
-        // The hot loop then reads top/middle/bottom triplets directly instead of
-        // resolving vertical chunk boundaries through rowFrom() nine times.
+        // Materialize only source rows that can actually be read by an
+        // evaluated target row. #23 copied all 64 rows from each horizontal
+        // chunk; sparse candidates need only rowsToUpdate and its +/-1 rows.
+        const std::uint64_t neededLocalRows =
+            rowsToUpdate | (rowsToUpdate << 1) | (rowsToUpdate >> 1);
+
         std::uint64_t westRows[ChunkSize + 2]{};
         std::uint64_t centerRows[ChunkSize + 2]{};
         std::uint64_t eastRows[ChunkSize + 2]{};
 
-        westRows[0] = northWest == nullptr ? 0 : northWest->rows[ChunkSize - 1];
-        centerRows[0] = north == nullptr ? 0 : north->rows[ChunkSize - 1];
-        eastRows[0] = northEast == nullptr ? 0 : northEast->rows[ChunkSize - 1];
-
-        if (west != nullptr) {
-            for (int y = 0; y < ChunkSize; ++y) westRows[y + 1] = west->rows[y];
-        }
-        if (center != nullptr) {
-            for (int y = 0; y < ChunkSize; ++y) centerRows[y + 1] = center->rows[y];
-        }
-        if (east != nullptr) {
-            for (int y = 0; y < ChunkSize; ++y) eastRows[y + 1] = east->rows[y];
+        if ((rowsToUpdate & NorthRowMask) != 0) {
+            westRows[0] = northWest == nullptr ? 0 : northWest->rows[ChunkSize - 1];
+            centerRows[0] = north == nullptr ? 0 : north->rows[ChunkSize - 1];
+            eastRows[0] = northEast == nullptr ? 0 : northEast->rows[ChunkSize - 1];
         }
 
-        westRows[ChunkSize + 1] = southWest == nullptr ? 0 : southWest->rows[0];
-        centerRows[ChunkSize + 1] = south == nullptr ? 0 : south->rows[0];
-        eastRows[ChunkSize + 1] = southEast == nullptr ? 0 : southEast->rows[0];
+        std::uint64_t pendingSourceRows = neededLocalRows;
+        while (pendingSourceRows != 0) {
+            const int y = std::countr_zero(pendingSourceRows);
+            const int rowIndex = y + 1;
+            westRows[rowIndex] = west == nullptr ? 0 : west->rows[y];
+            centerRows[rowIndex] = center == nullptr ? 0 : center->rows[y];
+            eastRows[rowIndex] = east == nullptr ? 0 : east->rows[y];
+            pendingSourceRows &= pendingSourceRows - 1;
+        }
+
+        if ((rowsToUpdate & SouthRowMask) != 0) {
+            westRows[ChunkSize + 1] = southWest == nullptr ? 0 : southWest->rows[0];
+            centerRows[ChunkSize + 1] = south == nullptr ? 0 : south->rows[0];
+            eastRows[ChunkSize + 1] = southEast == nullptr ? 0 : southEast->rows[0];
+        }
 
         Chunk nextChunk;
         std::uint64_t pendingRows = rowsToUpdate;
