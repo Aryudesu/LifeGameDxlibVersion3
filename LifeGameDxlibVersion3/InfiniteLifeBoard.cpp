@@ -4,6 +4,7 @@
 #include <limits>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace {
 std::size_t mix64(std::uint64_t value) noexcept {
@@ -216,8 +217,15 @@ void InfiniteLifeBoard::step() {
         }
     }
 
-    InfiniteLifeBoard next;
-    next.chunks_.reserve(candidates.size());
+    struct NextChunk {
+        ChunkCoord coord;
+        Chunk chunk;
+    };
+
+    // Finish all reads from the current board first. Afterwards its unordered_map
+    // nodes can be extracted and recycled for the next generation.
+    std::vector<NextChunk> nextChunks;
+    nextChunks.reserve(chunks_.size());
 
     std::uint64_t nextAliveCellCount = 0;
 
@@ -329,10 +337,33 @@ void InfiniteLifeBoard::step() {
         }
 
         if (!nextChunk.empty()) {
-            next.chunks_.emplace(coord, std::move(nextChunk));
+            nextChunks.push_back(NextChunk{coord, std::move(nextChunk)});
         }
     }
 
-    chunks_.swap(next.chunks_);
+    // candidates contains pointers into chunks_, so do not extract nodes until
+    // every candidate has been evaluated.
+    candidates.clear();
+
+    using ChunkNode = decltype(chunks_)::node_type;
+    std::vector<ChunkNode> reusableNodes;
+    reusableNodes.reserve(chunks_.size());
+    while (!chunks_.empty()) {
+        reusableNodes.push_back(chunks_.extract(chunks_.begin()));
+    }
+
+    chunks_.reserve(nextChunks.size());
+    std::size_t reusableIndex = 0;
+    for (auto& result : nextChunks) {
+        if (reusableIndex < reusableNodes.size()) {
+            ChunkNode& node = reusableNodes[reusableIndex++];
+            node.key() = result.coord;
+            node.mapped() = std::move(result.chunk);
+            chunks_.insert(std::move(node));
+        } else {
+            chunks_.emplace(result.coord, std::move(result.chunk));
+        }
+    }
+
     aliveCellCount_ = nextAliveCellCount;
 }
