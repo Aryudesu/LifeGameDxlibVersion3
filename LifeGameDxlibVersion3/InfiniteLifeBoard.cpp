@@ -171,48 +171,58 @@ void InfiniteLifeBoard::step() {
     std::unordered_map<ChunkCoord, CandidateNeighborhood, ChunkCoordHash> candidates;
     candidates.reserve(chunks_.size() * 2 + 16);
 
-    const auto addCandidate = [&](Coord x, Coord y, const Chunk* source, int sourceDx, int sourceDy) {
-        if (x < MinChunkCoord || x > MaxChunkCoord ||
-            y < MinChunkCoord || y > MaxChunkCoord) {
-            return;
-        }
-        auto [it, inserted] = candidates.try_emplace(ChunkCoord{x, y});
-        it->second.chunks[sourceDy + 1][sourceDx + 1] = source;
-    };
+    // Most candidates are existing chunks. Insert those exactly once first.
+    // Neighbor contributions can then update them with find(), avoiding the
+    // repeated try_emplace() work for the common self-candidate case.
+    for (const auto& [coord, chunk] : chunks_) {
+        auto [it, inserted] = candidates.try_emplace(coord);
+        it->second.chunks[1][1] = &chunk;
+    }
+
+    const auto addNeighborCandidate =
+        [&](Coord x, Coord y, const Chunk* source, int sourceDx, int sourceDy) {
+            if (x < MinChunkCoord || x > MaxChunkCoord ||
+                y < MinChunkCoord || y > MaxChunkCoord) {
+                return;
+            }
+
+            const ChunkCoord candidateCoord{x, y};
+            auto it = candidates.find(candidateCoord);
+            if (it == candidates.end()) {
+                it = candidates.try_emplace(candidateCoord).first;
+            }
+            it->second.chunks[sourceDy + 1][sourceDx + 1] = source;
+        };
 
     for (const auto& [coord, chunk] : chunks_) {
-        // Build each candidate's 3x3 neighborhood while discovering candidates.
-        // sourceDx/sourceDy are the source chunk's offsets from the candidate.
-        addCandidate(coord.x, coord.y, &chunk, 0, 0);
-
         if (chunk.westEdgeRows != 0 && coord.x > MinChunkCoord) {
-            addCandidate(coord.x - 1, coord.y, &chunk, 1, 0);
+            addNeighborCandidate(coord.x - 1, coord.y, &chunk, 1, 0);
         }
         if (chunk.eastEdgeRows != 0 && coord.x < MaxChunkCoord) {
-            addCandidate(coord.x + 1, coord.y, &chunk, -1, 0);
+            addNeighborCandidate(coord.x + 1, coord.y, &chunk, -1, 0);
         }
         if ((chunk.nonEmptyRows & NorthRowMask) != 0 && coord.y > MinChunkCoord) {
-            addCandidate(coord.x, coord.y - 1, &chunk, 0, 1);
+            addNeighborCandidate(coord.x, coord.y - 1, &chunk, 0, 1);
         }
         if ((chunk.nonEmptyRows & SouthRowMask) != 0 && coord.y < MaxChunkCoord) {
-            addCandidate(coord.x, coord.y + 1, &chunk, 0, -1);
+            addNeighborCandidate(coord.x, coord.y + 1, &chunk, 0, -1);
         }
 
         if ((chunk.westEdgeRows & NorthRowMask) != 0 &&
             coord.x > MinChunkCoord && coord.y > MinChunkCoord) {
-            addCandidate(coord.x - 1, coord.y - 1, &chunk, 1, 1);
+            addNeighborCandidate(coord.x - 1, coord.y - 1, &chunk, 1, 1);
         }
         if ((chunk.eastEdgeRows & NorthRowMask) != 0 &&
             coord.x < MaxChunkCoord && coord.y > MinChunkCoord) {
-            addCandidate(coord.x + 1, coord.y - 1, &chunk, -1, 1);
+            addNeighborCandidate(coord.x + 1, coord.y - 1, &chunk, -1, 1);
         }
         if ((chunk.westEdgeRows & SouthRowMask) != 0 &&
             coord.x > MinChunkCoord && coord.y < MaxChunkCoord) {
-            addCandidate(coord.x - 1, coord.y + 1, &chunk, 1, -1);
+            addNeighborCandidate(coord.x - 1, coord.y + 1, &chunk, 1, -1);
         }
         if ((chunk.eastEdgeRows & SouthRowMask) != 0 &&
             coord.x < MaxChunkCoord && coord.y < MaxChunkCoord) {
-            addCandidate(coord.x + 1, coord.y + 1, &chunk, -1, -1);
+            addNeighborCandidate(coord.x + 1, coord.y + 1, &chunk, -1, -1);
         }
     }
 
