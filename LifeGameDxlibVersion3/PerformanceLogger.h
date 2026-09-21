@@ -34,7 +34,11 @@ public:
         }
 
         stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,"
-                   "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct\n";
+                   "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct,"
+                   "step_ms_per_generation,candidate_build_ms_per_generation,"
+                   "candidate_evaluate_ms_per_generation,row_compute_estimated_ms_per_generation,"
+                   "next_insert_estimated_ms_per_generation,rows_evaluated_per_generation,"
+                   "timing_samples\n";
         stream_.flush();
 
         const auto start = Clock::now();
@@ -47,7 +51,15 @@ public:
                 std::uint64_t generation,
                 std::uint64_t alive,
                 std::size_t chunks,
-                bool paused) {
+                bool paused,
+                double stepMs,
+                int generationsExecuted,
+                double candidateBuildMs,
+                double candidateEvaluateMs,
+                double rowComputeEstimatedMs,
+                double nextInsertEstimatedMs,
+                std::uint64_t rowsEvaluated,
+                std::uint64_t timingSamples) {
         if (!stream_) return;
 
         const auto now = Clock::now();
@@ -78,6 +90,23 @@ public:
             : 0.0;
         const double frameBudgetUsagePercent = frameMs / TargetFrameMs * 100.0;
 
+        accumulatedStepMs_ += stepMs;
+        accumulatedGenerationsExecuted_ += generationsExecuted;
+        accumulatedCandidateBuildMs_ += candidateBuildMs;
+        accumulatedCandidateEvaluateMs_ += candidateEvaluateMs;
+        accumulatedRowComputeEstimatedMs_ += rowComputeEstimatedMs;
+        accumulatedNextInsertEstimatedMs_ += nextInsertEstimatedMs;
+        accumulatedRowsEvaluated_ += rowsEvaluated;
+        accumulatedTimingSamples_ += timingSamples;
+
+        const double profiledGenerations = static_cast<double>(accumulatedGenerationsExecuted_);
+        const double stepMsPerGeneration = profiledGenerations > 0 ? accumulatedStepMs_ / profiledGenerations : 0.0;
+        const double candidateBuildMsPerGeneration = profiledGenerations > 0 ? accumulatedCandidateBuildMs_ / profiledGenerations : 0.0;
+        const double candidateEvaluateMsPerGeneration = profiledGenerations > 0 ? accumulatedCandidateEvaluateMs_ / profiledGenerations : 0.0;
+        const double rowComputeEstimatedMsPerGeneration = profiledGenerations > 0 ? accumulatedRowComputeEstimatedMs_ / profiledGenerations : 0.0;
+        const double nextInsertEstimatedMsPerGeneration = profiledGenerations > 0 ? accumulatedNextInsertEstimatedMs_ / profiledGenerations : 0.0;
+        const double rowsEvaluatedPerGeneration = profiledGenerations > 0 ? static_cast<double>(accumulatedRowsEvaluated_) / profiledGenerations : 0.0;
+
         stream_ << std::fixed << std::setprecision(3)
                 << elapsedSeconds << ','
                 << generation << ','
@@ -89,11 +118,26 @@ public:
                 << frameMs << ','
                 << msPerGeneration << ','
                 << alivePerChunk << ','
-                << frameBudgetUsagePercent << '\n';
+                << frameBudgetUsagePercent << ','
+                << stepMsPerGeneration << ','
+                << candidateBuildMsPerGeneration << ','
+                << candidateEvaluateMsPerGeneration << ','
+                << rowComputeEstimatedMsPerGeneration << ','
+                << nextInsertEstimatedMsPerGeneration << ','
+                << rowsEvaluatedPerGeneration << ','
+                << accumulatedTimingSamples_ << '\n';
         stream_.flush();
 
         sampleStart_ = now;
         sampleGeneration_ = generation;
+        accumulatedStepMs_ = 0.0;
+        accumulatedGenerationsExecuted_ = 0;
+        accumulatedCandidateBuildMs_ = 0.0;
+        accumulatedCandidateEvaluateMs_ = 0.0;
+        accumulatedRowComputeEstimatedMs_ = 0.0;
+        accumulatedNextInsertEstimatedMs_ = 0.0;
+        accumulatedRowsEvaluated_ = 0;
+        accumulatedTimingSamples_ = 0;
     }
 
     const std::string& path() const noexcept { return path_; }
@@ -117,4 +161,12 @@ private:
     std::uint64_t sampleGeneration_ = 0;
     int sampleTargetGenPerSecond_ = 0;
     bool sampleInitialized_ = false;
+    double accumulatedStepMs_ = 0.0;
+    int accumulatedGenerationsExecuted_ = 0;
+    double accumulatedCandidateBuildMs_ = 0.0;
+    double accumulatedCandidateEvaluateMs_ = 0.0;
+    double accumulatedRowComputeEstimatedMs_ = 0.0;
+    double accumulatedNextInsertEstimatedMs_ = 0.0;
+    std::uint64_t accumulatedRowsEvaluated_ = 0;
+    std::uint64_t accumulatedTimingSamples_ = 0;
 };
