@@ -1,6 +1,7 @@
 #include "InfiniteLifeBoard.h"
 
 #include <bit>
+#include <chrono>
 #include <limits>
 #include <unordered_map>
 #include <utility>
@@ -156,7 +157,11 @@ void InfiniteLifeBoard::forEachAliveCell(const std::function<void(Coord, Coord)>
 }
 
 void InfiniteLifeBoard::step() {
+    using ProfileClock = std::chrono::steady_clock;
+    lastStepProfile_ = {};
     if (chunks_.empty()) return;
+
+    const auto candidateBuildStart = ProfileClock::now();
 
     constexpr Coord MinChunkCoord = std::numeric_limits<Coord>::min() / ChunkSize;
     constexpr Coord MaxChunkCoord = std::numeric_limits<Coord>::max() / ChunkSize;
@@ -255,12 +260,25 @@ void InfiniteLifeBoard::step() {
         }
     }
 
+    lastStepProfile_.candidateBuildMs =
+        std::chrono::duration<double, std::milli>(ProfileClock::now() - candidateBuildStart).count();
+    lastStepProfile_.candidateCount = candidates.size();
+
+    const auto candidateEvaluateStart = ProfileClock::now();
     InfiniteLifeBoard next;
     next.chunks_.reserve(candidates.size());
 
     std::uint64_t nextAliveCellCount = 0;
 
+    constexpr std::size_t TimingSampleStride = 256;
+    std::size_t candidateOrdinal = 0;
+    double sampledRowComputeMs = 0.0;
+    double sampledNextInsertMs = 0.0;
+    std::size_t sampledCandidates = 0;
+
     for (const Candidate& candidate : candidates) {
+        const bool sampleTiming = (candidateOrdinal++ % TimingSampleStride) == 0;
+        const auto rowComputeStart = sampleTiming ? ProfileClock::now() : ProfileClock::time_point{};
         const ChunkCoord& coord = candidate.coord;
         const auto& neighborhood = candidate.neighborhood.chunks;
 
@@ -324,6 +342,7 @@ void InfiniteLifeBoard::step() {
 
         Chunk nextChunk;
         std::uint64_t pendingRows = rowsToUpdate;
+        lastStepProfile_.rowsEvaluated += static_cast<std::uint64_t>(std::popcount(pendingRows));
         while (pendingRows != 0) {
             const int y = std::countr_zero(pendingRows);
             const std::uint64_t rowMask = std::uint64_t{1} << y;
@@ -391,9 +410,31 @@ void InfiniteLifeBoard::step() {
             pendingRows &= pendingRows - 1;
         }
 
+        const auto rowComputeEnd = sampleTiming ? ProfileClock::now() : ProfileClock::time_point{};
+        if (sampleTiming) {
+            sampledRowComputeMs +=
+                std::chrono::duration<double, std::milli>(rowComputeEnd - rowComputeStart).count();
+        }
+
         if (!nextChunk.empty()) {
             next.chunks_.emplace(coord, std::move(nextChunk));
         }
+
+        if (sampleTiming) {
+            sampledNextInsertMs +=
+                std::chrono::duration<double, std::milli>(ProfileClock::now() - rowComputeEnd).count();
+            ++sampledCandidates;
+        }
+    }
+
+    lastStepProfile_.candidateEvaluateMs =
+        std::chrono::duration<double, std::milli>(ProfileClock::now() - candidateEvaluateStart).count();
+    lastStepProfile_.timingSamples = sampledCandidates;
+    if (sampledCandidates != 0) {
+        const double scale = static_cast<double>(candidates.size()) /
+            static_cast<double>(sampledCandidates);
+        lastStepProfile_.rowComputeEstimatedMs = sampledRowComputeMs * scale;
+        lastStepProfile_.nextInsertEstimatedMs = sampledNextInsertMs * scale;
     }
 
     chunks_.swap(next.chunks_);
