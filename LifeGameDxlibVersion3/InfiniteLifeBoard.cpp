@@ -323,6 +323,10 @@ void InfiniteLifeBoard::step() {
         eastRows[ChunkSize + 1] = southEast == nullptr ? 0 : southEast->rows[0];
 
         Chunk nextChunk;
+        std::uint64_t nextNonEmptyRows = 0;
+        std::uint64_t nextWestEdgeRows = 0;
+        std::uint64_t nextEastEdgeRows = 0;
+        std::uint64_t chunkAliveCellCount = 0;
         std::uint64_t pendingRows = rowsToUpdate;
         while (pendingRows != 0) {
             const int y = std::countr_zero(pendingRows);
@@ -382,16 +386,20 @@ void InfiniteLifeBoard::step() {
 
             if (nextRow != 0) {
                 nextChunk.rows[y] = nextRow;
-                nextChunk.nonEmptyRows |= rowMask;
-                if ((nextRow & WestEdgeMask) != 0) nextChunk.westEdgeRows |= rowMask;
-                if ((nextRow & EastEdgeMask) != 0) nextChunk.eastEdgeRows |= rowMask;
-                nextAliveCellCount += static_cast<std::uint64_t>(std::popcount(nextRow));
+                nextNonEmptyRows |= rowMask;
+                nextWestEdgeRows |= rowMask & (0 - static_cast<std::uint64_t>((nextRow & WestEdgeMask) != 0));
+                nextEastEdgeRows |= rowMask & (0 - static_cast<std::uint64_t>((nextRow & EastEdgeMask) != 0));
+                chunkAliveCellCount += static_cast<std::uint64_t>(std::popcount(nextRow));
             }
 
             pendingRows &= pendingRows - 1;
         }
 
-        if (!nextChunk.empty()) {
+        if (nextNonEmptyRows != 0) {
+            nextChunk.nonEmptyRows = nextNonEmptyRows;
+            nextChunk.westEdgeRows = nextWestEdgeRows;
+            nextChunk.eastEdgeRows = nextEastEdgeRows;
+            nextAliveCellCount += chunkAliveCellCount;
             next.chunks_.emplace(coord, std::move(nextChunk));
         }
     }
