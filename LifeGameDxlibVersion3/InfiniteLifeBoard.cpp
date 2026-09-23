@@ -1,7 +1,8 @@
 #include "InfiniteLifeBoard.h"
 
 #include <bit>
-#include <limits>\n#include <stdexcept>
+#include <limits>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
