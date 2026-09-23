@@ -159,6 +159,11 @@ void InfiniteLifeBoard::forEachAliveCell(const std::function<void(Coord, Coord)>
 void InfiniteLifeBoard::step() {
     if (chunks_.empty()) return;
 
+    // Profiling-only knob for PR #35. Change only this value between runs.
+    // 0: old main reserve (chunks * 2 + 16)
+    // 1: 80,000, 2: 100,000, 3: 120,000, 4: #34 (indexCapacity / 2)
+    constexpr int CandidateReserveExperiment = 4;
+
     constexpr Coord MinChunkCoord = std::numeric_limits<Coord>::min() / ChunkSize;
     constexpr Coord MaxChunkCoord = std::numeric_limits<Coord>::max() / ChunkSize;
     constexpr std::uint64_t WestEdgeMask = 1ULL;
@@ -198,8 +203,15 @@ void InfiniteLifeBoard::step() {
     // upper bound for candidates before the first grow. Reserving that amount
     // avoids Candidate vector reallocations on large boards while reusing the
     // capacity calculation we already paid for.
-    candidates.reserve(indexCapacity / 2);
     const std::size_t oldCandidateReserve = chunks_.size() * 2 + 16;
+    std::size_t candidateReserve = indexCapacity / 2;
+    if constexpr (CandidateReserveExperiment == 0) candidateReserve = oldCandidateReserve;
+    else if constexpr (CandidateReserveExperiment == 1) candidateReserve = 80000;
+    else if constexpr (CandidateReserveExperiment == 2) candidateReserve = 100000;
+    else if constexpr (CandidateReserveExperiment == 3) candidateReserve = 120000;
+    static_assert(CandidateReserveExperiment >= 0 && CandidateReserveExperiment <= 4);
+    candidates.reserve(candidateReserve);
+
     std::size_t candidateVectorGrowths = 0;
     std::size_t observedCandidateCapacity = candidates.capacity();
 
