@@ -199,6 +199,9 @@ void InfiniteLifeBoard::step() {
     // avoids Candidate vector reallocations on large boards while reusing the
     // capacity calculation we already paid for.
     candidates.reserve(indexCapacity / 2);
+    const std::size_t oldCandidateReserve = chunks_.size() * 2 + 16;
+    std::size_t candidateVectorGrowths = 0;
+    std::size_t observedCandidateCapacity = candidates.capacity();
 
     std::vector<CandidateIndexSlot> candidateIndex(indexCapacity);
     std::size_t indexMask = indexCapacity - 1;
@@ -250,6 +253,10 @@ void InfiniteLifeBoard::step() {
                 slot.coord = coord;
                 slot.candidateIndex = denseIndex;
                 candidates.push_back(Candidate{coord, {}});
+                if (candidates.capacity() != observedCandidateCapacity) {
+                    observedCandidateCapacity = candidates.capacity();
+                    ++candidateVectorGrowths;
+                }
                 candidates[denseIndex].neighborhood.chunks[sourceDy + 1][sourceDx + 1] = source;
                 return;
             }
@@ -296,6 +303,12 @@ void InfiniteLifeBoard::step() {
             addCandidate(coord.x + 1, coord.y + 1, &chunk, -1, -1);
         }
     }
+
+    lastCandidateCount_ = candidates.size();
+    lastCandidateCapacity_ = candidates.capacity();
+    lastOldCandidateReserve_ = oldCandidateReserve;
+    lastCandidateIndexCapacity_ = candidateIndex.size();
+    lastCandidateVectorGrowths_ = candidateVectorGrowths;
 
     InfiniteLifeBoard next;
     next.chunks_.reserve(candidates.size());
