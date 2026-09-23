@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <limits>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -186,11 +187,37 @@ void InfiniteLifeBoard::step() {
     candidates.reserve(chunks_.size() * 2 + 16);
 
     std::size_t indexCapacity = 16;
-    const std::size_t desiredIndexCapacity = chunks_.size() * 4 + 16;
-    while (indexCapacity < desiredIndexCapacity) indexCapacity <<= 1;
+    // Start with the same practical sizing as #29, but avoid size * 4 overflow.
+    while (indexCapacity / 4 < chunks_.size()) {
+        if (indexCapacity > std::vector<CandidateIndexSlot>().max_size() / 2) {
+            throw std::length_error("candidate index is too large");
+        }
+        indexCapacity <<= 1;
+    }
     std::vector<CandidateIndexSlot> candidateIndex(indexCapacity);
-    const std::size_t indexMask = indexCapacity - 1;
+    std::size_t indexMask = indexCapacity - 1;
     const ChunkCoordHash candidateHash{};
+
+    const auto growCandidateIndex = [&]() {
+        if (candidateIndex.size() > candidateIndex.max_size() / 2) {
+            throw std::length_error("candidate index is too large");
+        }
+
+        std::vector<CandidateIndexSlot> grown(candidateIndex.size() * 2);
+        const std::size_t grownMask = grown.size() - 1;
+        for (const CandidateIndexSlot& oldSlot : candidateIndex) {
+            if (!oldSlot.occupied) continue;
+
+            std::size_t slotIndex = candidateHash(oldSlot.coord) & grownMask;
+            while (grown[slotIndex].occupied) {
+                slotIndex = (slotIndex + 1) & grownMask;
+            }
+            grown[slotIndex] = oldSlot;
+        }
+
+        candidateIndex.swap(grown);
+        indexMask = candidateIndex.size() - 1;
+    };
 
     const auto addCandidate = [&](Coord x, Coord y, const Chunk* source, int sourceDx, int sourceDy) {
         if (x < MinChunkCoord || x > MaxChunkCoord ||
@@ -203,6 +230,15 @@ void InfiniteLifeBoard::step() {
         while (true) {
             CandidateIndexSlot& slot = candidateIndex[slotIndex];
             if (!slot.occupied) {
+                // #29's initial table is large enough for the normal dense
+                // workload, so keep its insertion hot path unchanged. Growth
+                // is a cold path used only by unusually sparse layouts.
+                if (candidates.size() + 1 >= candidateIndex.size() / 2) {
+                    growCandidateIndex();
+                    slotIndex = candidateHash(coord) & indexMask;
+                    continue;
+                }
+
                 const std::size_t denseIndex = candidates.size();
                 slot.occupied = true;
                 slot.coord = coord;
