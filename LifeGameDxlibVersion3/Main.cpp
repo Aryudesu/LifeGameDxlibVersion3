@@ -304,6 +304,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) { ++simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (pageDown && !previousPageDown && simulationSpeedIndex > 0) { --simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (p && !previousP) {
+            selectionMode = false;
+            selection.clear();
             shapeTool = ShapeDrawing::Tool::Cell;
             shapeDragActive = false;
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
@@ -582,6 +584,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
             PatternPlacementPreview::draw(camera, PatternLibrary::at(selectedPatternIndex), previewX, previewY,
                                           patternRotation, BoardViewWidth, ScreenHeight);
+        }
+
+        if (paused && selectionMode && selection.dragging() && leftReleased) {
+            selection.finish(board, false);
         }
 
         const unsigned int background = GetColor(28, 30, 34);
