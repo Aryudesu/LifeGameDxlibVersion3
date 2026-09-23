@@ -17,6 +17,11 @@ public:
     void step();
     std::uint64_t aliveCellCount() const noexcept { return aliveCellCount_; }
     std::size_t chunkCount() const noexcept { return chunks_.size(); }
+    std::size_t lastCandidateCount() const noexcept { return lastCandidateCount_; }
+    std::size_t lastCandidateCapacity() const noexcept { return lastCandidateCapacity_; }
+    std::size_t lastOldCandidateReserve() const noexcept { return lastOldCandidateReserve_; }
+    std::size_t lastCandidateIndexCapacity() const noexcept { return lastCandidateIndexCapacity_; }
+    std::size_t lastCandidateVectorGrowths() const noexcept { return lastCandidateVectorGrowths_; }
 
     void forEachAliveCell(const std::function<void(Coord, Coord)>& visitor) const;
 
@@ -100,6 +105,11 @@ private:
 
     std::unordered_map<ChunkCoord, Chunk, ChunkCoordHash> chunks_;
     std::uint64_t aliveCellCount_ = 0;
+    std::size_t lastCandidateCount_ = 0;
+    std::size_t lastCandidateCapacity_ = 0;
+    std::size_t lastOldCandidateReserve_ = 0;
+    std::size_t lastCandidateIndexCapacity_ = 0;
+    std::size_t lastCandidateVectorGrowths_ = 0;
 
     static Coord floorDiv(Coord value, Coord divisor) noexcept;
     static int floorMod(Coord value, int divisor) noexcept;
