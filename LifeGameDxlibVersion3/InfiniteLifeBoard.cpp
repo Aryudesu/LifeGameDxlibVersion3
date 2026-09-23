@@ -184,7 +184,6 @@ void InfiniteLifeBoard::step() {
     // The much larger 3x3 neighborhoods live densely and are iterated without
     // scanning empty hash slots.
     std::vector<Candidate> candidates;
-    candidates.reserve(chunks_.size() * 2 + 16);
 
     std::size_t indexCapacity = 16;
     // Start with the same practical sizing as #29, but avoid size * 4 overflow.
@@ -194,6 +193,10 @@ void InfiniteLifeBoard::step() {
         }
         indexCapacity <<= 1;
     }
+
+    // Diagnostic-only: keep the exact same reserve amount as main, but move
+    // the call to the position used by #34/#35 to isolate codegen/layout effects.
+    candidates.reserve(chunks_.size() * 2 + 16);
     std::vector<CandidateIndexSlot> candidateIndex(indexCapacity);
     std::size_t indexMask = indexCapacity - 1;
     const ChunkCoordHash candidateHash{};
