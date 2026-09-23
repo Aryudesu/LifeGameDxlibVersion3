@@ -645,7 +645,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
 
         performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
-                                 board.aliveCellCount(), board.chunkCount(), paused);
+                                 board.aliveCellCount(), board.chunkCount(), paused,
+                                 board.lastCandidateCount(), board.lastCandidateCapacity(),
+                                 board.lastOldCandidateReserve(), board.lastCandidateIndexCapacity(),
+                                 board.lastCandidateVectorGrowths());
 
         previousEnter = enter;
         previousSpace = space;
