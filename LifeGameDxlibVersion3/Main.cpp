@@ -572,6 +572,26 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const unsigned int selectionColor = selection.liveOnly()
                 ? GetColor(255, 190, 80)
                 : GetColor(80, 190, 255);
+
+            if (selection.liveOnly()) {
+                // A live-cell mask is sparse: visualize the actual masked cells
+                // instead of only changing the rectangle color.
+                const int inset = cellSize >= 4 ? 2 : 0;
+                for (const SelectionMask::Cell& cell : selection.cells()) {
+                    const auto [sx, sy] = camera.boardToScreen(cell.x, cell.y);
+                    if (sx + cellSize <= 0 || sy + cellSize <= 0 ||
+                        sx >= BoardViewWidth || sy >= ScreenHeight) {
+                        continue;
+                    }
+                    if (cellSize == 1) {
+                        DrawPixel(sx, sy, selectionColor);
+                    } else {
+                        DrawBox(sx + inset, sy + inset,
+                                sx + cellSize - 1 - inset, sy + cellSize - 1 - inset,
+                                selectionColor, TRUE);
+                    }
+                }
+            }
             DrawBox(sx0, sy0, sx1 - 1, sy1 - 1, selectionColor, FALSE);
         }
 
