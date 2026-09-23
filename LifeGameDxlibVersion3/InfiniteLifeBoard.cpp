@@ -374,11 +374,11 @@ void InfiniteLifeBoard::step() {
                 (twosEF & twosFromOnes) |
                 (twosXor & (twosEF ^ twosFromOnes));
 
-            // Counts 2 and 3 share bit1=1 and all higher bits=0.
+            // Life survives/births only for neighbor counts 2 or 3.
+            // Both share bit1=1 and all higher bits=0; bit0 chooses between
+            // birth (3) and survival of an existing cell (2).
             const std::uint64_t lowCounts = twos & ~fours;
-            const std::uint64_t exactlyTwo = lowCounts & ~ones;
-            const std::uint64_t exactlyThree = lowCounts & ones;
-            const std::uint64_t nextRow = exactlyThree | (middle & exactlyTwo);
+            const std::uint64_t nextRow = lowCounts & (ones | middle);
 
             if (nextRow != 0) {
                 nextChunk.rows[y] = nextRow;
