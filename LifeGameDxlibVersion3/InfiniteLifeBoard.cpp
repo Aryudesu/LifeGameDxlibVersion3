@@ -1,7 +1,7 @@
 #include "InfiniteLifeBoard.h"
 
 #include <bit>
-#include <limits>
+#include <limits>\n#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -186,11 +186,38 @@ void InfiniteLifeBoard::step() {
     candidates.reserve(chunks_.size() * 2 + 16);
 
     std::size_t indexCapacity = 16;
-    const std::size_t desiredIndexCapacity = chunks_.size() * 4 + 16;
-    while (indexCapacity < desiredIndexCapacity) indexCapacity <<= 1;
+    // Keep the initial table at roughly the same size as #29 without doing
+    // overflow-prone size * 4 arithmetic.
+    while (indexCapacity / 4 < chunks_.size()) {
+        if (indexCapacity > std::vector<CandidateIndexSlot>().max_size() / 2) {
+            throw std::length_error("candidate index is too large");
+        }
+        indexCapacity <<= 1;
+    }
     std::vector<CandidateIndexSlot> candidateIndex(indexCapacity);
-    const std::size_t indexMask = indexCapacity - 1;
+    std::size_t indexMask = indexCapacity - 1;
     const ChunkCoordHash candidateHash{};
+
+    const auto growCandidateIndex = [&]() {
+        if (candidateIndex.size() > candidateIndex.max_size() / 2) {
+            throw std::length_error("candidate index is too large");
+        }
+
+        std::vector<CandidateIndexSlot> grown(candidateIndex.size() * 2);
+        const std::size_t grownMask = grown.size() - 1;
+        for (const CandidateIndexSlot& oldSlot : candidateIndex) {
+            if (!oldSlot.occupied) continue;
+
+            std::size_t slotIndex = candidateHash(oldSlot.coord) & grownMask;
+            while (grown[slotIndex].occupied) {
+                slotIndex = (slotIndex + 1) & grownMask;
+            }
+            grown[slotIndex] = oldSlot;
+        }
+
+        candidateIndex.swap(grown);
+        indexMask = candidateIndex.size() - 1;
+    };
 
     const auto addCandidate = [&](Coord x, Coord y, const Chunk* source, int sourceDx, int sourceDy) {
         if (x < MinChunkCoord || x > MaxChunkCoord ||
@@ -199,23 +226,33 @@ void InfiniteLifeBoard::step() {
         }
 
         const ChunkCoord coord{x, y};
-        std::size_t slotIndex = candidateHash(coord) & indexMask;
         while (true) {
+            std::size_t slotIndex = candidateHash(coord) & indexMask;
+            while (candidateIndex[slotIndex].occupied) {
+                CandidateIndexSlot& slot = candidateIndex[slotIndex];
+                if (slot.coord == coord) {
+                    candidates[slot.candidateIndex].neighborhood.chunks[sourceDy + 1][sourceDx + 1] = source;
+                    return;
+                }
+                slotIndex = (slotIndex + 1) & indexMask;
+            }
+
+            // Grow before inserting when the new entry would reach 50% load.
+            // This guarantees an empty probe slot even for pathological sparse
+            // boards where nearly every live chunk creates distinct neighbors.
+            if (candidates.size() + 1 >= candidateIndex.size() / 2) {
+                growCandidateIndex();
+                continue;
+            }
+
+            const std::size_t denseIndex = candidates.size();
             CandidateIndexSlot& slot = candidateIndex[slotIndex];
-            if (!slot.occupied) {
-                const std::size_t denseIndex = candidates.size();
-                slot.occupied = true;
-                slot.coord = coord;
-                slot.candidateIndex = denseIndex;
-                candidates.push_back(Candidate{coord, {}});
-                candidates[denseIndex].neighborhood.chunks[sourceDy + 1][sourceDx + 1] = source;
-                return;
-            }
-            if (slot.coord == coord) {
-                candidates[slot.candidateIndex].neighborhood.chunks[sourceDy + 1][sourceDx + 1] = source;
-                return;
-            }
-            slotIndex = (slotIndex + 1) & indexMask;
+            slot.occupied = true;
+            slot.coord = coord;
+            slot.candidateIndex = denseIndex;
+            candidates.push_back(Candidate{coord, {}});
+            candidates[denseIndex].neighborhood.chunks[sourceDy + 1][sourceDx + 1] = source;
+            return;
         }
     };
 
