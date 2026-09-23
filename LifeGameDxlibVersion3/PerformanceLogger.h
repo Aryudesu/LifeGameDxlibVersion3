@@ -34,7 +34,8 @@ public:
         }
 
         stream_ << "elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,"
-                   "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct\n";
+                   "frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct,"
+                   "candidates,candidate_capacity,old_candidate_reserve,candidate_index_capacity,candidate_vector_growths\n";
         stream_.flush();
 
         const auto start = Clock::now();
@@ -47,7 +48,12 @@ public:
                 std::uint64_t generation,
                 std::uint64_t alive,
                 std::size_t chunks,
-                bool paused) {
+                bool paused,
+                std::size_t candidates,
+                std::size_t candidateCapacity,
+                std::size_t oldCandidateReserve,
+                std::size_t candidateIndexCapacity,
+                std::size_t candidateVectorGrowths) {
         if (!stream_) return;
 
         const auto now = Clock::now();
@@ -89,7 +95,12 @@ public:
                 << frameMs << ','
                 << msPerGeneration << ','
                 << alivePerChunk << ','
-                << frameBudgetUsagePercent << '\n';
+                << frameBudgetUsagePercent << ','
+                << candidates << ','
+                << candidateCapacity << ','
+                << oldCandidateReserve << ','
+                << candidateIndexCapacity << ','
+                << candidateVectorGrowths << '\n';
         stream_.flush();
 
         sampleStart_ = now;
