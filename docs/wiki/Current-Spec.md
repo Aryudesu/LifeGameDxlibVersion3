@@ -58,4 +58,12 @@ RLE parserも移植済み。
 
 ## Selection
 
-PR #37で矩形選択・mask基盤を開発中。mainへ未マージのため、現行main仕様にはまだ含めない。
+PR #37でmainへ導入済み。
+
+- V: 選択モード ON/OFF
+- LMB drag: 矩形選択
+- M: 通常矩形 / 生存セルのみのmask切替
+- 通常選択は青枠、live-cell maskは橙枠 + 対象セルを橙表示
+- 通常矩形はboundsのみ保持し、live-cell maskは疎なcell listとして保持
+
+PR #39でCopy/Cut/Paste + ghost previewを開発中。
