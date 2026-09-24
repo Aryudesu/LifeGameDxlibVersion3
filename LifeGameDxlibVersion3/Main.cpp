@@ -150,6 +150,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousG = false;
     bool previousV = false;
     bool previousM = false;
+    bool previousH = false;
+    bool previousJ = false;
     bool previousCopyShortcut = false;
     bool previousCutShortcut = false;
     bool previousPasteShortcut = false;
@@ -252,6 +254,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool g = CheckHitKey(KEY_INPUT_G) != 0;
         const bool v = CheckHitKey(KEY_INPUT_V) != 0;
         const bool m = CheckHitKey(KEY_INPUT_M) != 0;
+        const bool h = CheckHitKey(KEY_INPUT_H) != 0;
+        const bool j = CheckHitKey(KEY_INPUT_J) != 0;
         const bool f9 = CheckHitKey(KEY_INPUT_F9) != 0;
         const bool escape = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
         const bool ctrl = CheckHitKey(KEY_INPUT_LCONTROL) != 0 || CheckHitKey(KEY_INPUT_RCONTROL) != 0;
@@ -362,8 +366,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 patternListScroll.ensurePatternVisible(selectedPatternIndex);
             }
         }
-        if (q && !previousQ && selectedPatternIndex != 0) patternRotation = (patternRotation + 3) & 3;
-        if (e && !previousE && selectedPatternIndex != 0) patternRotation = (patternRotation + 1) & 3;
+        if (q && !previousQ) {
+            if (pasteMode && clipboard.hasData()) clipboard.rotateCounterClockwise();
+            else if (selectedPatternIndex != 0) patternRotation = (patternRotation + 3) & 3;
+        }
+        if (e && !previousE) {
+            if (pasteMode && clipboard.hasData()) clipboard.rotateClockwise();
+            else if (selectedPatternIndex != 0) patternRotation = (patternRotation + 1) & 3;
+        }
+        if (pasteMode && clipboard.hasData() && h && !previousH) clipboard.flipHorizontal();
+        if (pasteMode && clipboard.hasData() && j && !previousJ) clipboard.flipVertical();
 
         if (CheckHitKey(KEY_INPUT_LEFT)) camera.move(-4, 0);
         if (CheckHitKey(KEY_INPUT_RIGHT)) camera.move(4, 0);
@@ -630,7 +642,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 if (cellSize == 1) DrawPixel(sx, sy, aliveColor);
                 else DrawBox(sx, sy, sx + cellSize - 1, sy + cellSize - 1, aliveColor, TRUE);
             });
-        if (showGrid) drawGrid(camera);
 
         if (paused && selection.active()) {
             const auto [sx0, sy0] = camera.boardToScreen(selection.minX(), selection.minY());
@@ -689,6 +700,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             PatternPlacementPreview::draw(camera, PatternLibrary::at(selectedPatternIndex), previewX, previewY,
                                           patternRotation, BoardViewWidth, ScreenHeight);
         }
+
+        // Keep grid lines visible over pattern/clipboard ghosts.
+        if (showGrid) drawGrid(camera);
 
         if (paused && selectionMode && selection.dragging() && leftReleased) {
             selection.finish(board, false);
@@ -784,7 +798,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
         const char* defaultHelp = pasteMode
-            ? "Paste: LMB place / RMB or Esc cancel"
+            ? "Paste: LMB place / Q/E rotate / H/J flip / RMB or Esc cancel"
             : (selectionMode
                 ? (selection.liveOnly() ? "Select: LMB drag / M: full rectangle" : "Select: LMB drag / M: live-cell mask")
                 : "Shape: drag LMB add / RMB erase");
@@ -816,6 +830,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousG = g;
         previousV = v;
         previousM = m;
+        previousH = h;
+        previousJ = j;
         previousCopyShortcut = copyShortcut;
         previousCutShortcut = cutShortcut;
         previousPasteShortcut = pasteShortcut;
