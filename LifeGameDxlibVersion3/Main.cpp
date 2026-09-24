@@ -222,8 +222,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
+                pasteMode = false;
                 selectionMode = false;
                 selection.clear();
+                clipboard.clear();
                 paused = true;
                 simulationAccumulator = 0.0;
             } else {
@@ -273,8 +275,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             cellStrokeActive = false;
             cellStrokeHasLastCell = false;
             shapeDragActive = false;
+            pasteMode = false;
             selectionMode = false;
             selection.clear();
+            clipboard.clear();
             generation = 0;
             paused = true;
             simulationAccumulator = 0.0;
