@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <string>
 #include <thread>
+#include <windows.h>
 
 namespace {
 constexpr int BoardViewWidth = 1024;
@@ -384,6 +385,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const int wheel = GetMouseWheelRotVol();
         const bool mouseOnBoard = mouseX >= 0 && mouseX < BoardViewWidth && mouseY >= 0 && mouseY < ScreenHeight;
         const bool mouseOnPanel = mouseX >= PanelX && mouseX < WindowWidth && mouseY >= 0 && mouseY < ScreenHeight;
+
+        // Make the current board interaction visible at a glance.
+        // Selection uses a crosshair; middle-button camera movement uses the
+        // standard four-way move cursor. Other tools keep the normal arrow.
+        HCURSOR desiredCursor = LoadCursor(nullptr, IDC_ARROW);
+        if (mouseOnBoard) {
+            if (middle) desiredCursor = LoadCursor(nullptr, IDC_SIZEALL);
+            else if (paused && selectionMode) desiredCursor = LoadCursor(nullptr, IDC_CROSS);
+        }
+        SetCursor(desiredCursor);
 
         if (mouseOnPanel && inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) {
             patternListScroll.scroll(toolCategory, wheel);
