@@ -11,6 +11,7 @@
 #include "PerformanceLogger.h"
 #include "ShapeDrawing.h"
 #include "SelectionMask.h"
+#include "SelectionClipboard.h"
 #include "ToolbarIcons.h"
 
 #include <algorithm>
@@ -148,6 +149,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousG = false;
     bool previousV = false;
     bool previousM = false;
+    bool previousCopyShortcut = false;
+    bool previousCutShortcut = false;
+    bool previousPasteShortcut = false;
     bool previousF9 = false;
     bool previousSaveShortcut = false;
     bool previousLoadShortcut = false;
@@ -166,6 +170,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool shapeErase = false;
     bool selectionMode = false;
     SelectionMask selection;
+    SelectionClipboard clipboard;
+    bool pasteMode = false;
     InfiniteLifeBoard::Coord shapeStartX = 0;
     InfiniteLifeBoard::Coord shapeStartY = 0;
     InfiniteLifeBoard::Coord shapeEndX = 0;
@@ -252,6 +258,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool undoShortcut = ctrl && CheckHitKey(KEY_INPUT_Z) != 0 && !shift;
         const bool redoShortcut = (ctrl && CheckHitKey(KEY_INPUT_Y) != 0) ||
                                   (ctrl && shift && CheckHitKey(KEY_INPUT_Z) != 0);
+        const bool copyShortcut = ctrl && CheckHitKey(KEY_INPUT_C) != 0;
+        const bool cutShortcut = ctrl && CheckHitKey(KEY_INPUT_X) != 0;
+        const bool pasteShortcut = ctrl && CheckHitKey(KEY_INPUT_V) != 0;
 
         if (enter && !previousEnter) {
             paused = !paused;
@@ -271,15 +280,46 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             simulationAccumulator = 0.0;
         }
         if (g && !previousG) showGrid = !showGrid;
-        if (v && !previousV && paused) {
+        if (v && !previousV && paused && !ctrl) {
             selectionMode = !selectionMode;
             shapeDragActive = false;
             cellStrokeHasLastCell = false;
             selectedPatternIndex = 0;
             patternRotation = 0;
         }
-        if (m && !previousM && paused && selection.active() && !selection.dragging()) {
+        if (m && !previousM && paused && selection.active() && !selection.dragging() && !pasteMode) {
             selection.setLiveOnly(board, !selection.liveOnly());
+        }
+        if (paused && copyShortcut && !previousCopyShortcut && selection.active() && !selection.dragging()) {
+            if (clipboard.copy(board, selection)) pasteMode = false;
+        }
+        if (paused && cutShortcut && !previousCutShortcut && selection.active() && !selection.dragging()) {
+            if (clipboard.copy(board, selection)) {
+                editHistory.begin();
+                if (selection.liveOnly()) {
+                    for (const SelectionMask::Cell& cell : selection.cells()) {
+                        editHistory.setAlive(board, cell.x, cell.y, false);
+                    }
+                } else {
+                    board.forEachAliveCellInRect(selection.minX(), selection.minY(),
+                        selection.maxX() + 1, selection.maxY() + 1,
+                        [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+                            editHistory.setAlive(board, x, y, false);
+                        });
+                }
+                editHistory.commit();
+                selection.clear();
+                selectionMode = false;
+                pasteMode = true;
+            }
+        }
+        if (paused && pasteShortcut && !previousPasteShortcut && clipboard.hasData()) {
+            pasteMode = true;
+            selectionMode = false;
+            selection.clear();
+            selectedPatternIndex = 0;
+            shapeDragActive = false;
+            cellStrokeHasLastCell = false;
         }
         if (f9 && !previousF9) {
             std::string report;
@@ -292,6 +332,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (escape) {
             if (selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
             shapeDragActive = false;
+            pasteMode = false;
             selectionMode = false;
             selection.clear();
         }
@@ -439,7 +480,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
             if (paused && !middle) {
                 const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
-                if (selectionMode) {
+                if (pasteMode && clipboard.hasData()) {
+                    if (rightPressed) {
+                        pasteMode = false;
+                    } else if (leftPressed) {
+                        editHistory.begin();
+                        clipboard.paste(x, y, [&](InfiniteLifeBoard::Coord cellX, InfiniteLifeBoard::Coord cellY, bool alive) {
+                            editHistory.setAlive(board, cellX, cellY, alive);
+                        });
+                        editHistory.commit();
+                    }
+                } else if (selectionMode) {
                     if (leftPressed) selection.begin(x, y);
                     if (selection.dragging() && left) selection.update(x, y);
                     if (selection.dragging() && leftReleased) {
@@ -600,7 +651,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                                       BoardViewWidth, ScreenHeight, shapeErase);
         }
 
-        if (paused && mouseOnBoard && !middle && selectedPatternIndex != 0) {
+        if (paused && mouseOnBoard && !middle && pasteMode && clipboard.hasData()) {
+            const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
+            const unsigned int ghostColor = GetColor(90, 220, 255);
+            const int inset = cellSize >= 4 ? 2 : 0;
+            for (const SelectionClipboard::Cell& cell : clipboard.cells()) {
+                const auto [sx, sy] = camera.boardToScreen(previewX + cell.x, previewY + cell.y);
+                if (sx + cellSize <= 0 || sy + cellSize <= 0 || sx >= BoardViewWidth || sy >= ScreenHeight) continue;
+                if (cellSize == 1) DrawPixel(sx, sy, ghostColor);
+                else DrawBox(sx + inset, sy + inset, sx + cellSize - 1 - inset, sy + cellSize - 1 - inset, ghostColor, TRUE);
+            }
+            const auto [sx0, sy0] = camera.boardToScreen(previewX, previewY);
+            const auto [sx1, sy1] = camera.boardToScreen(previewX + clipboard.width(), previewY + clipboard.height());
+            DrawBox(sx0, sy0, sx1 - 1, sy1 - 1, ghostColor, FALSE);
+        } else if (paused && mouseOnBoard && !middle && selectedPatternIndex != 0) {
             const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
             PatternPlacementPreview::draw(camera, PatternLibrary::at(selectedPatternIndex), previewX, previewY,
                                           patternRotation, BoardViewWidth, ScreenHeight);
@@ -699,11 +763,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
 
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        const char* defaultHelp = selectionMode
-            ? (selection.liveOnly() ? "Select: LMB drag / M: full rectangle" : "Select: LMB drag / M: live-cell mask")
-            : "Shape: drag LMB add / RMB erase";
+        const char* defaultHelp = pasteMode
+            ? "Paste: LMB place / RMB or Esc cancel"
+            : (selectionMode
+                ? (selection.liveOnly() ? "Select: LMB drag / M: full rectangle" : "Select: LMB drag / M: live-cell mask")
+                : "Shape: drag LMB add / RMB erase");
         DrawString(PanelContentX, 966, hoverHelp != nullptr ? hoverHelp : defaultHelp, muted);
-        DrawString(PanelContentX, 988, "Shortcuts: Ctrl+Z/Y/S/L, P, Q/E, G, V select, M mask", muted);
+        DrawString(PanelContentX, 988, "Ctrl+C/X/V clipboard, V select, M mask, Ctrl+Z/Y", muted);
         if (hoverHelp != nullptr) ToolbarIcons::drawTooltip(mouseX, mouseY, hoverHelp, WindowWidth, ScreenHeight);
         ScreenFlip();
 
@@ -730,6 +796,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousG = g;
         previousV = v;
         previousM = m;
+        previousCopyShortcut = copyShortcut;
+        previousCutShortcut = cutShortcut;
+        previousPasteShortcut = pasteShortcut;
         previousF9 = f9;
         previousSaveShortcut = saveShortcut;
         previousLoadShortcut = loadShortcut;
