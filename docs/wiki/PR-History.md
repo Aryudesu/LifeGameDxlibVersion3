@@ -44,6 +44,8 @@
 
 ## Current feature work
 
-- #37 矩形選択と生存セルmask基盤 — Draft / development中
+- #37 矩形選択と生存セルmask基盤 — merged
+- #38 [DO NOT MERGE] Wiki草案 — 長期保存・更新用
+- #39 Selection Clipboard / Copy/Cut/Paste / ghost preview — Draft / development中
 
 性能PRは「mergeされたものだけが成功」ではない。不採用実験も、次の設計（特に#28→#29）を決める重要な資料として残す。
