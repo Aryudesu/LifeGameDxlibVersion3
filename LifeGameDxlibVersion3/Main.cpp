@@ -10,6 +10,7 @@
 #include "PatternPlacementPreview.h"
 #include "PerformanceLogger.h"
 #include "ShapeDrawing.h"
+#include "SelectionMask.h"
 #include "ToolbarIcons.h"
 
 #include <algorithm>
@@ -145,6 +146,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     bool previousQ = false;
     bool previousE = false;
     bool previousG = false;
+    bool previousV = false;
+    bool previousM = false;
     bool previousF9 = false;
     bool previousSaveShortcut = false;
     bool previousLoadShortcut = false;
@@ -161,6 +164,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     ShapeDrawing::Tool shapeTool = ShapeDrawing::Tool::Cell;
     bool shapeDragActive = false;
     bool shapeErase = false;
+    bool selectionMode = false;
+    SelectionMask selection;
     InfiniteLifeBoard::Coord shapeStartX = 0;
     InfiniteLifeBoard::Coord shapeStartY = 0;
     InfiniteLifeBoard::Coord shapeEndX = 0;
@@ -211,6 +216,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 cellStrokeActive = false;
                 cellStrokeHasLastCell = false;
                 shapeDragActive = false;
+                selectionMode = false;
+                selection.clear();
                 paused = true;
                 simulationAccumulator = 0.0;
             } else {
@@ -234,6 +241,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool q = CheckHitKey(KEY_INPUT_Q) != 0;
         const bool e = CheckHitKey(KEY_INPUT_E) != 0;
         const bool g = CheckHitKey(KEY_INPUT_G) != 0;
+        const bool v = CheckHitKey(KEY_INPUT_V) != 0;
+        const bool m = CheckHitKey(KEY_INPUT_M) != 0;
         const bool f9 = CheckHitKey(KEY_INPUT_F9) != 0;
         const bool escape = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
         const bool ctrl = CheckHitKey(KEY_INPUT_LCONTROL) != 0 || CheckHitKey(KEY_INPUT_RCONTROL) != 0;
@@ -255,11 +264,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             cellStrokeActive = false;
             cellStrokeHasLastCell = false;
             shapeDragActive = false;
+            selectionMode = false;
+            selection.clear();
             generation = 0;
             paused = true;
             simulationAccumulator = 0.0;
         }
         if (g && !previousG) showGrid = !showGrid;
+        if (v && !previousV && paused) {
+            selectionMode = !selectionMode;
+            shapeDragActive = false;
+            cellStrokeHasLastCell = false;
+            selectedPatternIndex = 0;
+            patternRotation = 0;
+        }
+        if (m && !previousM && paused && selection.active() && !selection.dragging()) {
+            selection.setLiveOnly(board, !selection.liveOnly());
+        }
         if (f9 && !previousF9) {
             std::string report;
             const bool passed = LifeStepSelfTest::run(report);
@@ -271,6 +292,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (escape) {
             if (selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
             shapeDragActive = false;
+            selectionMode = false;
+            selection.clear();
         }
 
         if (paused && undoShortcut && !previousUndoShortcut && !cellStrokeActive && !shapeDragActive) editHistory.undo(board);
@@ -281,6 +304,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) { ++simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (pageDown && !previousPageDown && simulationSpeedIndex > 0) { --simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (p && !previousP) {
+            selectionMode = false;
+            selection.clear();
             shapeTool = ShapeDrawing::Tool::Cell;
             shapeDragActive = false;
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
@@ -350,6 +375,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
                 if (ToolbarIcons::hit(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize)) {
                     shapeTool = ShapeTools[i];
+                    selectionMode = false;
+                    selection.clear();
                     selectedPatternIndex = 0;
                     patternRotation = 0;
                     shapeDragActive = false;
@@ -363,6 +390,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
                 if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
                     shapeTool = ShapeDrawing::Tool::Cell;
+                    selectionMode = false;
+                    selection.clear();
                     toolCategory = ToolCategories[i];
                     selectedPatternIndex = firstPatternInCategory(toolCategory);
                     patternRotation = 0;
@@ -410,7 +439,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
             if (paused && !middle) {
                 const auto [x, y] = camera.screenToBoard(mouseX, mouseY);
-                if (selectedPatternIndex == 0) {
+                if (selectionMode) {
+                    if (leftPressed) selection.begin(x, y);
+                    if (selection.dragging() && left) selection.update(x, y);
+                    if (selection.dragging() && leftReleased) {
+                        selection.update(x, y);
+                        selection.finish(board, false);
+                    }
+                } else if (selectedPatternIndex == 0) {
                     if (shapeTool == ShapeDrawing::Tool::Cell) {
                         if ((leftPressed || rightPressed) && (left || right) && !cellStrokeActive) {
                             editHistory.begin();
@@ -530,6 +566,35 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             });
         if (showGrid) drawGrid(camera);
 
+        if (paused && selection.active()) {
+            const auto [sx0, sy0] = camera.boardToScreen(selection.minX(), selection.minY());
+            const auto [sx1, sy1] = camera.boardToScreen(selection.maxX() + 1, selection.maxY() + 1);
+            const unsigned int selectionColor = selection.liveOnly()
+                ? GetColor(255, 190, 80)
+                : GetColor(80, 190, 255);
+
+            if (selection.liveOnly()) {
+                // A live-cell mask is sparse: visualize the actual masked cells
+                // instead of only changing the rectangle color.
+                const int inset = cellSize >= 4 ? 2 : 0;
+                for (const SelectionMask::Cell& cell : selection.cells()) {
+                    const auto [sx, sy] = camera.boardToScreen(cell.x, cell.y);
+                    if (sx + cellSize <= 0 || sy + cellSize <= 0 ||
+                        sx >= BoardViewWidth || sy >= ScreenHeight) {
+                        continue;
+                    }
+                    if (cellSize == 1) {
+                        DrawPixel(sx, sy, selectionColor);
+                    } else {
+                        DrawBox(sx + inset, sy + inset,
+                                sx + cellSize - 1 - inset, sy + cellSize - 1 - inset,
+                                selectionColor, TRUE);
+                    }
+                }
+            }
+            DrawBox(sx0, sy0, sx1 - 1, sy1 - 1, selectionColor, FALSE);
+        }
+
         if (paused && shapeDragActive && selectedPatternIndex == 0 && shapeTool != ShapeDrawing::Tool::Cell) {
             ShapeDrawing::drawPreview(shapeTool, camera, shapeStartX, shapeStartY, shapeEndX, shapeEndY,
                                       BoardViewWidth, ScreenHeight, shapeErase);
@@ -539,6 +604,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
             PatternPlacementPreview::draw(camera, PatternLibrary::at(selectedPatternIndex), previewX, previewY,
                                           patternRotation, BoardViewWidth, ScreenHeight);
+        }
+
+        if (paused && selectionMode && selection.dragging() && leftReleased) {
+            selection.finish(board, false);
         }
 
         const unsigned int background = GetColor(28, 30, 34);
@@ -630,8 +699,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
 
         DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
-        DrawString(PanelContentX, 966, hoverHelp != nullptr ? hoverHelp : "Shape: drag LMB add / RMB erase", muted);
-        DrawString(PanelContentX, 988, "Shortcuts: Ctrl+Z/Y/S/L, P, Q/E, G", muted);
+        const char* defaultHelp = selectionMode
+            ? (selection.liveOnly() ? "Select: LMB drag / M: full rectangle" : "Select: LMB drag / M: live-cell mask")
+            : "Shape: drag LMB add / RMB erase";
+        DrawString(PanelContentX, 966, hoverHelp != nullptr ? hoverHelp : defaultHelp, muted);
+        DrawString(PanelContentX, 988, "Shortcuts: Ctrl+Z/Y/S/L, P, Q/E, G, V select, M mask", muted);
         if (hoverHelp != nullptr) ToolbarIcons::drawTooltip(mouseX, mouseY, hoverHelp, WindowWidth, ScreenHeight);
         ScreenFlip();
 
@@ -656,6 +728,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousQ = q;
         previousE = e;
         previousG = g;
+        previousV = v;
+        previousM = m;
         previousF9 = f9;
         previousSaveShortcut = saveShortcut;
         previousLoadShortcut = loadShortcut;
