@@ -114,9 +114,23 @@ std::size_t firstPatternInCategory(PatternCategory category) noexcept {
 void drawGrid(const InfiniteCamera& camera) {
     const int cellSize = camera.cellSize();
     if (cellSize <= 1) return;
+
     const unsigned int gridColor = GetColor(45, 45, 45);
-    for (int x = 0; x <= BoardViewWidth; x += cellSize) DrawLine(x, 0, x, ScreenHeight, gridColor);
-    for (int y = 0; y <= ScreenHeight; y += cellSize) DrawLine(0, y, BoardViewWidth, y, gridColor);
+
+    // The board origin is not necessarily aligned with the screen origin after
+    // panning/zooming. Start from the screen position of a board-cell boundary,
+    // then normalize it into one cell-size period so lines extend both left/up
+    // and right/down across the whole viewport.
+    const auto [originX, originY] = camera.boardToScreen(0, 0);
+    const int firstX = ((originX % cellSize) + cellSize) % cellSize;
+    const int firstY = ((originY % cellSize) + cellSize) % cellSize;
+
+    for (int x = firstX; x <= BoardViewWidth; x += cellSize) {
+        DrawLine(x, 0, x, ScreenHeight, gridColor);
+    }
+    for (int y = firstY; y <= ScreenHeight; y += cellSize) {
+        DrawLine(0, y, BoardViewWidth, y, gridColor);
+    }
 }
 } // namespace
 
