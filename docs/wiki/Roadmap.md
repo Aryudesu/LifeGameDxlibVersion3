@@ -8,18 +8,16 @@
 
 ## Selection / Clipboard
 
-PR #37から段階的に進める。
+PR #37: 矩形選択 + mask基盤 — merged
 
-想定:
-1. 矩形選択
-2. mask基盤
-3. Copy
-4. Cut
-5. Paste + ghost preview
-6. 選択/clipboardの移動
-7. 90度回転
-8. horizontal / vertical flip
-9. Undo/Redo統合
+PR #39: Copy / Cut / Paste + ghost preview + Undo/Redo — development中
+
+その後の想定:
+1. 選択/clipboardの移動
+2. 90度回転
+3. horizontal / vertical flip
+4. mask反転などmask編集の拡張
+5. 必要ならpasteのadd/replace mode
 
 maskは巨大矩形を全セル配列として保持しない。通常矩形はboundsでlazyに表現し、生存セルmask等は疎なセル集合として扱う方向。
 
