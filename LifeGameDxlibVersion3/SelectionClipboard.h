@@ -56,6 +56,42 @@ public:
         return true;
     }
 
+    void rotateClockwise() {
+        if (!hasData_) return;
+        const Coord oldHeight = height_;
+        for (Cell& cell : cells_) {
+            const Coord oldX = cell.x;
+            cell.x = oldHeight - 1 - cell.y;
+            cell.y = oldX;
+        }
+        const Coord oldWidth = width_;
+        width_ = height_;
+        height_ = oldWidth;
+    }
+
+    void rotateCounterClockwise() {
+        if (!hasData_) return;
+        const Coord oldWidth = width_;
+        for (Cell& cell : cells_) {
+            const Coord oldY = cell.y;
+            cell.y = oldWidth - 1 - cell.x;
+            cell.x = oldY;
+        }
+        const Coord oldHeight = height_;
+        height_ = width_;
+        width_ = oldHeight;
+    }
+
+    void flipHorizontal() {
+        if (!hasData_) return;
+        for (Cell& cell : cells_) cell.x = width_ - 1 - cell.x;
+    }
+
+    void flipVertical() {
+        if (!hasData_) return;
+        for (Cell& cell : cells_) cell.y = height_ - 1 - cell.y;
+    }
+
     template <class SetAlive>
     void paste(Coord left, Coord top, SetAlive&& setAlive) const {
         if (!hasData_) return;
