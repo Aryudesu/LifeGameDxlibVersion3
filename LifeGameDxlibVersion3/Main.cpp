@@ -659,6 +659,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
             const unsigned int ghostColor = GetColor(90, 220, 255);
             const int inset = cellSize >= 4 ? 2 : 0;
+            if (clipboard.replaceRectangle()) {
+                const auto [sx0, sy0] = camera.boardToScreen(previewX, previewY);
+                const auto [sx1, sy1] = camera.boardToScreen(previewX + clipboard.width(), previewY + clipboard.height());
+                DrawBox(sx0, sy0, sx1 - 1, sy1 - 1, GetColor(55, 70, 75), TRUE);
+            }
             for (const SelectionClipboard::Cell& cell : clipboard.cells()) {
                 const auto [sx, sy] = camera.boardToScreen(previewX + cell.x, previewY + cell.y);
                 if (sx + cellSize <= 0 || sy + cellSize <= 0 || sx >= BoardViewWidth || sy >= ScreenHeight) continue;
