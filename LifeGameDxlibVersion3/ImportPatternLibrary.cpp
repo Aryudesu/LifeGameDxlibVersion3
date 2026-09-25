@@ -3,6 +3,7 @@
 #include "RleParser.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 
@@ -10,9 +11,19 @@ namespace {
 namespace fs = std::filesystem;
 const fs::path ImportPatternDirectory = fs::path("patterns") / "import";
 
+bool isRleExtension(const fs::path& path) {
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return extension == ".rle";
+}
+
 bool readPattern(const fs::path& path, ImportPattern& pattern, std::string& parseError) {
     std::ifstream input(path, std::ios::binary);
-    if (!input) return false;
+    if (!input) {
+        parseError = "Failed to open the RLE file.";
+        return false;
+    }
     const std::string source((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     ParsedRlePattern parsed;
     if (!RleParser::parse(source, parsed, parseError)) return false;
@@ -24,6 +35,7 @@ bool readPattern(const fs::path& path, ImportPattern& pattern, std::string& pars
 bool ImportPatternLibrary::load(std::string& errorMessage) {
     errorMessage.clear();
     patterns_.clear();
+
     std::error_code ec;
     fs::create_directories(ImportPatternDirectory, ec);
     if (ec) {
@@ -33,18 +45,28 @@ bool ImportPatternLibrary::load(std::string& errorMessage) {
 
     for (const auto& entry : fs::directory_iterator(ImportPatternDirectory, ec)) {
         if (ec) break;
-        if (!entry.is_regular_file() || entry.path().extension() != ".rle") continue;
+        if (!entry.is_regular_file() || !isRleExtension(entry.path())) continue;
+
         ImportPattern pattern;
         std::string parseError;
-        if (readPattern(entry.path(), pattern, parseError)) patterns_.push_back(std::move(pattern));
+        if (!readPattern(entry.path(), pattern, parseError)) {
+            errorMessage = "Failed to load imported RLE '" +
+                           entry.path().filename().string() + "': " +
+                           (parseError.empty() ? "Unknown error." : parseError);
+            return false;
+        }
+        patterns_.push_back(std::move(pattern));
     }
+
     if (ec) {
         errorMessage = "Failed to read patterns/import directory.";
         return false;
     }
-    std::sort(patterns_.begin(), patterns_.end(), [](const ImportPattern& a, const ImportPattern& b) {
-        return a.name < b.name;
-    });
+
+    std::sort(patterns_.begin(), patterns_.end(),
+        [](const ImportPattern& a, const ImportPattern& b) {
+            return a.name < b.name;
+        });
     return true;
 }
 
@@ -52,12 +74,12 @@ bool ImportPatternLibrary::importFile(const std::string& sourcePath, std::size_t
                                       std::string& errorMessage) {
     errorMessage.clear();
     const fs::path source(sourcePath);
-    if (source.extension() != ".rle") {
+
+    if (!isRleExtension(source)) {
         errorMessage = "The selected file is not an RLE file.";
         return false;
     }
 
-    // Validate before copying so malformed files never enter the import library.
     ImportPattern validated;
     std::string parseError;
     if (!readPattern(source, validated, parseError)) {
@@ -89,6 +111,7 @@ bool ImportPatternLibrary::importFile(const std::string& sourcePath, std::size_t
     }
 
     if (!load(errorMessage)) return false;
+
     const std::string importedName = destination.stem().string();
     for (std::size_t i = 0; i < patterns_.size(); ++i) {
         if (patterns_[i].name == importedName) {
@@ -96,6 +119,7 @@ bool ImportPatternLibrary::importFile(const std::string& sourcePath, std::size_t
             return true;
         }
     }
+
     errorMessage = "The imported pattern could not be found after reloading.";
     return false;
 }
