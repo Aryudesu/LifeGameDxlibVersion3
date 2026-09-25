@@ -122,5 +122,10 @@ bool UserPatternLibrary::save(const std::string& name, int width, int height,
         errorMessage = "Failed while writing the user pattern RLE file.";
         return false;
     }
+    output.close();
+    if (!output) {
+        errorMessage = "Failed while closing the user pattern RLE file.";
+        return false;
+    }
     return load(errorMessage);
 }
