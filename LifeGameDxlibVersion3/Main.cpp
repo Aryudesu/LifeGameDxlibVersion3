@@ -1106,13 +1106,27 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
         }
 
-        const int patternCount = userPatternCategory
-            ? static_cast<int>(userPatterns.size())
-            : (importPatternCategory ? static_cast<int>(importPatterns.size()) + 1 : patternListScroll.count(toolCategory));
-        if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
-            const int firstVisible = scrollOffset + 1;
-            const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
-            DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted, "%d-%d / %d", firstVisible, lastVisible, patternCount);
+        if (panelTab == PanelTab::Pattern && importPatternCategory) {
+            const int importPatternCount = static_cast<int>(importPatterns.size());
+            const int importRows = importPatternCount + 1; // + IMPORT RLE... action row
+            if (importRows > PatternListScroll::VisibleRows && importPatternCount > 0) {
+                const int firstVisible = std::max(1, importPatternScrollOffset);
+                const int lastVisible = std::min(
+                    importPatternCount,
+                    importPatternScrollOffset + PatternListScroll::VisibleRows - 1);
+                DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted,
+                                 "%d-%d / %d", firstVisible, lastVisible, importPatternCount);
+            }
+        } else {
+            const int patternCount = userPatternCategory
+                ? static_cast<int>(userPatterns.size())
+                : patternListScroll.count(toolCategory);
+            if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
+                const int firstVisible = scrollOffset + 1;
+                const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
+                DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted,
+                                 "%d-%d / %d", firstVisible, lastVisible, patternCount);
+            }
         }
 
         const int infoY = 602;
