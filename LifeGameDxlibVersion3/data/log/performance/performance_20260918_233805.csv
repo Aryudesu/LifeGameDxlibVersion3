@@ -1,0 +1,5 @@
+elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct,step_ms_per_generation,step_ms_per_frame,board_render_ms_per_frame,work_ms_per_frame,generations_executed,candidate_build_ms_per_generation,candidate_evaluate_ms_per_generation,candidates_per_generation,rows_evaluated_per_generation
+1.015,60,60,59.996,59.998,5,1,16.667,16.668,5.000,100.003,0.005,0.005,0.004,14.200,60,0.003,0.002,1.067,5.150
+2.032,121,60,60.013,60.017,5,1,16.662,16.663,5.000,99.972,0.005,0.005,0.004,14.114,61,0.003,0.001,1.000,5.000
+3.034,181,60,59.893,59.841,5,1,16.711,16.697,5.000,100.265,0.005,0.005,0.004,14.587,60,0.003,0.002,1.000,5.000
+4.037,241,60,59.819,59.664,5,1,16.761,16.717,5.000,100.564,0.006,0.006,0.004,13.728,60,0.003,0.002,1.000,5.000

@@ -1,0 +1,2 @@
+elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks
+1.031,61,60,60.077,59.977,5,1
