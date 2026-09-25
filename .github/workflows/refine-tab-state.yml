@@ -1,0 +1,64 @@
+name: Refine tab state
+on:
+  push:
+    paths:
+      - '.github/workflows/refine-tab-state.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tool-panel-tabs
+      - name: Apply state transition fix
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('LifeGameDxlibVersion3/Main.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = '''                    panelTab = static_cast<PanelTab>(i);
+                    if (panelTab == PanelTab::Draw) {
+                        selectionMode = false; selection.clear(); pasteMode = false;
+                        selectedPatternIndex = 0; patternRotation = 0;
+                    } else if (panelTab == PanelTab::Pattern) {
+                        selectionMode = false; selection.clear(); pasteMode = false;
+                    } else {
+                        selectedPatternIndex = 0; patternRotation = 0;
+                        shapeDragActive = false; cellStrokeHasLastCell = false;
+                    }
+                    handled = true;'''
+          new = '''                    const PanelTab previousTab = panelTab;
+                    panelTab = static_cast<PanelTab>(i);
+
+                    // Tool choices are persistent, but EDIT operations are temporary.
+                    // Leaving EDIT always returns board interaction to the normal Cell pen.
+                    if (previousTab == PanelTab::Edit && panelTab != PanelTab::Edit) {
+                        selectionMode = false;
+                        selection.clear();
+                        pasteMode = false;
+                        shapeTool = ShapeDrawing::Tool::Cell;
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
+                    }
+
+                    // Do not discard the last DRAW tool or PATTERN choice merely by
+                    // visiting another tab. Only the active interaction is cancelled.
+                    if (panelTab == PanelTab::Edit) {
+                        selectedPatternIndex = 0;
+                        patternRotation = 0;
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
+                    }
+                    handled = true;'''
+          if old not in s:
+              raise SystemExit('tab transition block not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+      - name: Commit result
+        run: |
+          git config user.name "Aryu"
+          git config user.email "suwako_a-u-@hotmail.co.jp"
+          git add LifeGameDxlibVersion3/Main.cpp
+          git commit -m "ツール選択を保持しEDIT離脱時はペンへ戻す"
+          git push
