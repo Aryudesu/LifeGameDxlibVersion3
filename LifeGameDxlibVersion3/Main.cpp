@@ -254,7 +254,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const auto minX = selection.minX(), minY = selection.minY();
         const auto maxX = selection.maxX(), maxY = selection.maxY();
         if (maxX - minX >= std::numeric_limits<int>::max() || maxY - minY >= std::numeric_limits<int>::max()) {
-            FileDialog::showError("選択範囲が大きすぎるため、パターンとして保存できません。");
+            FileDialog::showError("The selected area is too large to save as a pattern.");
             return;
         }
         std::vector<PatternCell> cells;
@@ -262,9 +262,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
                 cells.push_back({static_cast<int>(x - minX), static_cast<int>(y - minY)});
             });
-        if (cells.empty()) { FileDialog::showError("選択範囲に生存セルがありません。"); return; }
+        if (cells.empty()) { FileDialog::showError("The selection does not contain any live cells."); return; }
         std::string name;
-        if (!TextInputDialog::show(GetMainWindowHandle(), "ユーザーパターンを保存", "パターン名:", name)) {
+        if (!TextInputDialog::show(GetMainWindowHandle(), "Save User Pattern", "Pattern name:", name)) {
             resetTimingAfterDialog();
             return;
         }
@@ -377,10 +377,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (clipboard.copy(board, selection)) {
                 editHistory.begin();
                 if (selection.liveOnly()) {
-                    for (const SelectionMask::Cell& cell : selection.cells()) editHistory.setAlive(board, cell.x, cell.y, false);
+                    for (const SelectionMask::Cell& cell : selection.cells()) {
+                        editHistory.setAlive(board, cell.x, cell.y, false);
+                    }
                 } else {
-                    board.forEachAliveCellInRect(selection.minX(), selection.minY(), selection.maxX() + 1, selection.maxY() + 1,
-                        [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) { editHistory.setAlive(board, x, y, false); });
+                    board.forEachAliveCellInRect(selection.minX(), selection.minY(),
+                        selection.maxX() + 1, selection.maxY() + 1,
+                        [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+                            editHistory.setAlive(board, x, y, false);
+                        });
                 }
                 editHistory.commit();
                 selection.clear();
@@ -392,43 +397,101 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             pasteMode = true;
             selectionMode = false;
             selection.clear();
+            selectedPatternIndex = 0;
+            shapeDragActive = false;
+            cellStrokeHasLastCell = false;
         }
-        if (paused && h && !previousH && clipboard.hasData()) clipboard.flipHorizontal();
-        if (paused && j && !previousJ && clipboard.hasData()) clipboard.flipVertical();
-        if (paused && q && !previousQ) {
-            if (pasteMode && clipboard.hasData()) clipboard.rotateCounterClockwise();
-            else if (panelTab == PanelTab::Pattern && selectedPatternIndex != 0) patternRotation = (patternRotation + 3) & 3;
+        if (f9 && !previousF9) {
+            std::string report;
+            const bool passed = LifeStepSelfTest::run(report);
+            MessageBoxA(GetMainWindowHandle(), report.c_str(),
+                passed ? "Life step self-test: PASS" : "Life step self-test: FAILED",
+                MB_OK | (passed ? MB_ICONINFORMATION : MB_ICONERROR));
+            resetTimingAfterDialog();
         }
-        if (paused && e && !previousE) {
-            if (pasteMode && clipboard.hasData()) clipboard.rotateClockwise();
-            else if (panelTab == PanelTab::Pattern && selectedPatternIndex != 0) patternRotation = (patternRotation + 1) & 3;
+        if (escape) {
+            if (selectedPatternIndex != 0) { selectedPatternIndex = 0; patternRotation = 0; }
+            shapeDragActive = false;
+            pasteMode = false;
+            selectionMode = false;
+            selection.clear();
         }
-        if (escape && pasteMode) pasteMode = false;
+
+        if (paused && undoShortcut && !previousUndoShortcut && !cellStrokeActive && !shapeDragActive) editHistory.undo(board);
+        if (paused && redoShortcut && !previousRedoShortcut && !cellStrokeActive && !shapeDragActive) editHistory.redo(board);
         if (saveShortcut && !previousSaveShortcut) saveWithDialog();
         if (loadShortcut && !previousLoadShortcut) loadWithDialog();
+
+        if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) { ++simulationSpeedIndex; simulationAccumulator = 0.0; }
+        if (pageDown && !previousPageDown && simulationSpeedIndex > 0) { --simulationSpeedIndex; simulationAccumulator = 0.0; }
+        if (p && !previousP) {
+            panelTab = PanelTab::Pattern;
+            selectionMode = false;
+            selection.clear();
+            shapeDragActive = false;
+            if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
+            else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
+            patternRotation = 0;
+            if (selectedPatternIndex != 0) {
+                toolCategory = PatternLibrary::at(selectedPatternIndex).category;
+                patternListScroll.ensurePatternVisible(selectedPatternIndex);
+            }
+        }
+        if (q && !previousQ) {
+            if (pasteMode && clipboard.hasData()) clipboard.rotateCounterClockwise();
+            else if (selectedPatternIndex != 0) patternRotation = (patternRotation + 3) & 3;
+        }
+        if (e && !previousE) {
+            if (pasteMode && clipboard.hasData()) clipboard.rotateClockwise();
+            else if (selectedPatternIndex != 0) patternRotation = (patternRotation + 1) & 3;
+        }
+        if (pasteMode && clipboard.hasData() && h && !previousH) clipboard.flipHorizontal();
+        if (pasteMode && clipboard.hasData() && j && !previousJ) clipboard.flipVertical();
+
+        if (CheckHitKey(KEY_INPUT_LEFT)) camera.move(-4, 0);
+        if (CheckHitKey(KEY_INPUT_RIGHT)) camera.move(4, 0);
+        if (CheckHitKey(KEY_INPUT_UP)) camera.move(0, -4);
+        if (CheckHitKey(KEY_INPUT_DOWN)) camera.move(0, 4);
 
         int mouseX = 0, mouseY = 0;
         GetMousePoint(&mouseX, &mouseY);
         const int mouseDeltaX = mouseX - previousMouseX;
         const int mouseDeltaY = mouseY - previousMouseY;
-        const int mouseButtons = GetMouseInput();
-        const bool left = (mouseButtons & MOUSE_INPUT_LEFT) != 0;
-        const bool right = (mouseButtons & MOUSE_INPUT_RIGHT) != 0;
-        const bool middle = (mouseButtons & MOUSE_INPUT_MIDDLE) != 0;
+        const int mouseInput = GetMouseInput();
+        const bool left = (mouseInput & MOUSE_INPUT_LEFT) != 0;
+        const bool right = (mouseInput & MOUSE_INPUT_RIGHT) != 0;
+        const bool middle = (mouseInput & MOUSE_INPUT_MIDDLE) != 0;
         const bool leftPressed = left && !previousLeft;
         const bool rightPressed = right && !previousRight;
         const bool leftReleased = !left && previousLeft;
         const bool rightReleased = !right && previousRight;
         const int wheel = GetMouseWheelRotVol();
         const bool mouseOnBoard = mouseX >= 0 && mouseX < BoardViewWidth && mouseY >= 0 && mouseY < ScreenHeight;
+        const bool mouseOnPanel = mouseX >= PanelX && mouseX < WindowWidth && mouseY >= 0 && mouseY < ScreenHeight;
 
-        const bool historyEnabled = paused && !cellStrokeActive && !shapeDragActive;
-        if (historyEnabled && undoShortcut && !previousUndoShortcut && editHistory.undoCount() > 0) editHistory.undo(board);
-        if (historyEnabled && redoShortcut && !previousRedoShortcut && editHistory.redoCount() > 0) editHistory.redo(board);
+        // Make the current board interaction visible at a glance.
+        // Selection uses a crosshair; middle-button camera movement uses the
+        // standard four-way move cursor. Other tools keep the normal arrow.
+        HCURSOR desiredCursor = LoadCursor(nullptr, IDC_ARROW);
+        if (mouseOnBoard) {
+            if (middle) desiredCursor = LoadCursor(nullptr, IDC_SIZEALL);
+            else if (paused && selectionMode) desiredCursor = LoadCursor(nullptr, IDC_CROSS);
+        }
+        SetCursor(desiredCursor);
 
-        if (leftPressed) {
+        if (mouseOnPanel && panelTab == PanelTab::Pattern &&
+            inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) {
+            if (userPatternCategory) {
+                const int maxOffset = std::max(0, static_cast<int>(userPatterns.size()) - PatternListScroll::VisibleRows);
+                userPatternScrollOffset = std::clamp(userPatternScrollOffset - wheel, 0, maxOffset);
+            } else patternListScroll.scroll(toolCategory, wheel);
+        }
+
+        if (mouseOnPanel && leftPressed) {
             bool handled = false;
-            for (std::size_t i = 0; i < ActionIcons.size(); ++i) {
+            const bool historyEnabled = paused && !cellStrokeActive && !shapeDragActive;
+
+            for (std::size_t i = 0; i < ActionIcons.size() && !handled; ++i) {
                 const int leftX = ActionToolbarX + static_cast<int>(i) * (ActionButtonSize + ActionButtonGap);
                 if (!ToolbarIcons::hit(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize)) continue;
 
@@ -835,85 +898,102 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             DrawBox(sx0, sy0, sx1 - 1, sy1 - 1, selectionColor, FALSE);
         }
 
-        DrawBox(PanelX, 0, WindowWidth, ScreenHeight, GetColor(24, 24, 28), TRUE);
+        if (paused && selectionMode && selection.dragging() && leftReleased) {
+            selection.finish(board, false);
+        }
 
-        const int actionMouseX = mouseX;
-        const int actionMouseY = mouseY;
+        const unsigned int background = GetColor(28, 30, 34);
+        const unsigned int section = GetColor(45, 48, 54);
+        const unsigned int selected = GetColor(70, 105, 75);
+        const unsigned int text = GetColor(235, 235, 235);
+        const unsigned int muted = GetColor(170, 175, 180);
+        DrawBox(PanelX, 0, WindowWidth, ScreenHeight, background, TRUE);
+        DrawString(PanelContentX, 14, "LIFE GAME TOOLS", text);
+
+        const bool historyEnabled = paused && !cellStrokeActive && !shapeDragActive;
         for (std::size_t i = 0; i < ActionIcons.size(); ++i) {
             const int leftX = ActionToolbarX + static_cast<int>(i) * (ActionButtonSize + ActionButtonGap);
-            const bool enabled = (ActionIcons[i] != ToolbarIcons::Icon::Undo && ActionIcons[i] != ToolbarIcons::Icon::Redo) ||
-                                 (historyEnabled && (ActionIcons[i] == ToolbarIcons::Icon::Undo ? editHistory.undoCount() > 0 : editHistory.redoCount() > 0));
-            ToolbarIcons::draw(ActionIcons[i], leftX, ActionButtonY, ActionButtonSize, actionMouseX, actionMouseY, enabled);
+            bool enabled = true;
+            if (ActionIcons[i] == ToolbarIcons::Icon::Undo) enabled = historyEnabled && editHistory.undoCount() > 0;
+            if (ActionIcons[i] == ToolbarIcons::Icon::Redo) enabled = historyEnabled && editHistory.redoCount() > 0;
+            ToolbarIcons::drawButton(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize, ActionIcons[i], false, enabled);
         }
 
         for (int i = 0; i < 3; ++i) {
             const int leftX = PanelContentX + i * (PanelTabWidth + PanelTabGap);
-            const bool active = panelTab == static_cast<PanelTab>(i);
-            DrawBox(leftX, PanelTabY, leftX + PanelTabWidth, PanelTabY + PanelTabHeight,
-                    active ? GetColor(72, 72, 82) : GetColor(44, 44, 50), TRUE);
-            DrawString(leftX + 10, PanelTabY + 7, PanelTabLabels[i],
-                       active ? GetColor(255, 255, 255) : GetColor(185, 185, 195));
+            const bool active = static_cast<int>(panelTab) == i;
+            DrawBox(leftX, PanelTabY, leftX + PanelTabWidth, PanelTabY + PanelTabHeight, active ? selected : section, TRUE);
+            DrawString(leftX + 10, PanelTabY + 7, PanelTabLabels[i], active ? text : muted);
         }
 
-        if (panelTab == PanelTab::Draw) {
-            DrawString(PanelContentX, 76, "Tool", GetColor(190, 190, 200));
-            for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
-                const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
-                ToolbarIcons::draw(ShapeIcons[i], leftX, ToolButtonY, ToolButtonSize,
-                                   mouseX, mouseY, shapeTool == ShapeTools[i]);
-            }
-        } else if (panelTab == PanelTab::Pattern) {
-            DrawString(PanelContentX, 76, "Category", GetColor(190, 190, 200));
-            for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
-                const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
-                const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
-                const bool active = !userPatternCategory && toolCategory == ToolCategories[i];
-                DrawBox(leftX, top, leftX + 136, top + 28, active ? GetColor(78, 78, 88) : GetColor(44, 44, 50), TRUE);
-                DrawString(leftX + 8, top + 6, PatternLibrary::categoryName(ToolCategories[i]), GetColor(225, 225, 230));
-            }
-            {
-                const int leftX = PanelContentX + 144, top = 86 + 2 * 36;
-                DrawBox(leftX, top, leftX + 136, top + 28, userPatternCategory ? GetColor(78, 78, 88) : GetColor(44, 44, 50), TRUE);
-                DrawString(leftX + 8, top + 6, "User", GetColor(225, 225, 230));
-            }
+        if (panelTab == PanelTab::Draw) for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
+            const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
+            const bool isSelected = selectedPatternIndex == 0 && shapeTool == ShapeTools[i];
+            ToolbarIcons::drawButton(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize, ShapeIcons[i], isSelected, true);
+        }
 
-            DrawString(PanelContentX, 174, "Pattern", GetColor(190, 190, 200));
-            if (userPatternCategory) {
-                for (std::size_t i = 0; i < userPatterns.size(); ++i) {
-                    const int row = static_cast<int>(i) - userPatternScrollOffset;
-                    if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
-                    const int top = PatternListY + row * PatternRowHeight;
-                    const bool selected = selectedPatternIndex == PatternLibrary::size() + i;
-                    if (selected) DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, GetColor(62, 62, 72), TRUE);
-                    DrawString(PanelContentX + 8, top + 5, userPatterns.at(i).name.c_str(), GetColor(225, 225, 230));
-                }
-            } else {
-                const int scrollOffset = patternListScroll.offset(toolCategory);
-                int categoryRow = 0;
-                for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
-                    const LifePattern& pattern = PatternLibrary::at(i);
-                    if (pattern.category != toolCategory) continue;
-                    if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
-                        const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
-                        if (selectedPatternIndex == i) DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, GetColor(62, 62, 72), TRUE);
-                        DrawString(PanelContentX + 8, top + 5, pattern.name, GetColor(225, 225, 230));
-                    }
-                    ++categoryRow;
-                }
-            }
+        if (panelTab == PanelTab::Pattern) for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
+            const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
+            const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
+            DrawBox(leftX, top, leftX + 136, top + 28, !userPatternCategory && selectedPatternIndex != 0 && toolCategory == ToolCategories[i] ? selected : section, TRUE);
+            DrawString(leftX + 8, top + 6, PatternLibrary::categoryName(ToolCategories[i]), text);
+        }
 
-            if (selectedPatternIndex != 0) {
-                DrawString(PanelContentX, RotationY - 24, "Rotation", GetColor(190, 190, 200));
-                DrawBox(RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight, GetColor(44, 44, 50), TRUE);
-                DrawString(RotationLeftX + 17, RotationY + 7, "<", GetColor(225, 225, 230));
-                DrawBox(RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight, GetColor(62, 62, 72), TRUE);
-                const std::string rotationText = std::to_string(patternRotation * 90) + " deg";
-                DrawString(RotationValueX + 24, RotationY + 7, rotationText.c_str(), GetColor(225, 225, 230));
-                DrawBox(RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight, GetColor(44, 44, 50), TRUE);
-                DrawString(RotationRightX + 17, RotationY + 7, ">", GetColor(225, 225, 230));
+        if (panelTab == PanelTab::Pattern) {
+            const int userLeft = PanelContentX + 144, userTop = 86 + 2 * 36;
+            DrawBox(userLeft, userTop, userLeft + 136, userTop + 28, userPatternCategory ? selected : section, TRUE);
+            DrawString(userLeft + 8, userTop + 6, "User", text);
+        }
+
+        const int scrollOffset = userPatternCategory ? userPatternScrollOffset : patternListScroll.offset(toolCategory);
+        int categoryRow = 0;
+        if (panelTab == PanelTab::Pattern && !userPatternCategory) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
+            const LifePattern& pattern = PatternLibrary::at(i);
+            if (pattern.category != toolCategory) continue;
+            if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
+                const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
+                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, selectedPatternIndex == i ? selected : section, TRUE);
+                DrawString(PanelContentX + 8, top + 5, pattern.name, text);
             }
-        } else {
-            DrawString(PanelContentX, 76, "Edit", GetColor(190, 190, 200));
+            ++categoryRow;
+        }
+
+        if (panelTab == PanelTab::Pattern && userPatternCategory) {
+            for (std::size_t i = 0; i < userPatterns.size(); ++i) {
+                const int row = static_cast<int>(i) - userPatternScrollOffset;
+                if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                const int top = PatternListY + row * PatternRowHeight;
+                const std::size_t encoded = PatternLibrary::size() + i;
+                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, selectedPatternIndex == encoded ? selected : section, TRUE);
+                DrawString(PanelContentX + 8, top + 5, userPatterns.at(i).name.c_str(), text);
+            }
+        }
+
+        const int patternCount = userPatternCategory ? static_cast<int>(userPatterns.size()) : patternListScroll.count(toolCategory);
+        if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
+            const int firstVisible = scrollOffset + 1;
+            const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
+            DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted, "%d-%d / %d", firstVisible, lastVisible, patternCount);
+        }
+
+        const int infoY = 602;
+        DrawString(PanelContentX, infoY, "STATUS", muted);
+        DrawFormatString(PanelContentX, infoY + 26, text, "Generation  %llu", static_cast<unsigned long long>(generation));
+        DrawFormatString(PanelContentX, infoY + 50, text, "FPS         %.1f", fps);
+        DrawFormatString(PanelContentX, infoY + 74, text, "Speed       %d gen/s", SimulationSpeeds[simulationSpeedIndex]);
+        DrawFormatString(PanelContentX, infoY + 98, text, "Alive       %llu", static_cast<unsigned long long>(board.aliveCellCount()));
+        DrawFormatString(PanelContentX, infoY + 122, text, "Chunks      %llu", static_cast<unsigned long long>(board.chunkCount()));
+        DrawFormatString(PanelContentX, infoY + 146, text, "Camera      (%lld, %lld)", static_cast<long long>(camera.x()), static_cast<long long>(camera.y()));
+        DrawFormatString(PanelContentX, infoY + 170, text, "Zoom        %d", camera.cellSize());
+        DrawFormatString(PanelContentX, infoY + 194, text, "Grid        %s", showGrid ? "ON" : "OFF");
+        DrawFormatString(PanelContentX, infoY + 218, text, "Undo/Redo   %llu / %llu",
+                         static_cast<unsigned long long>(editHistory.undoCount()),
+                         static_cast<unsigned long long>(editHistory.redoCount()));
+        const char* panelToolName = panelTab == PanelTab::Edit ? "Edit" :
+                                    (panelTab == PanelTab::Pattern ? "Pattern" : ShapeDrawing::toolName(shapeTool));
+        DrawFormatString(PanelContentX, infoY + 242, text, "Tool        %s", panelToolName);
+
+        if (panelTab == PanelTab::Edit) {
             const int fullLeft = PanelContentX, fullRight = WindowWidth - PanelPadding;
             const int row0 = 92, row1 = row0 + EditButtonHeight + EditButtonGap;
             const int row2 = row1 + EditButtonHeight + EditButtonGap;
@@ -922,40 +1002,68 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const int row5 = row4 + EditButtonHeight + EditButtonGap;
             const int halfGap = 8, halfWidth = (PanelContentWidth - halfGap) / 2;
             const int rightLeft = fullLeft + halfWidth + halfGap;
-            auto drawEditButton = [&](int leftX, int top, int rightX, const char* label, bool enabled, bool active = false) {
-                const unsigned int bg = !enabled ? GetColor(34, 34, 38) : active ? GetColor(72, 72, 82) : GetColor(44, 44, 50);
-                const unsigned int fg = enabled ? GetColor(225, 225, 230) : GetColor(105, 105, 112);
-                DrawBox(leftX, top, rightX, top + EditButtonHeight, bg, TRUE);
-                const int width = GetDrawStringWidth(label, static_cast<int>(std::char_traits<char>::length(label)));
-                DrawString(leftX + (rightX - leftX - width) / 2, top + 8, label, fg);
+            auto editButton = [&](int left, int top, int right, const char* label, bool enabled, bool active = false) {
+                DrawBox(left, top, right, top + EditButtonHeight, active ? selected : section, TRUE);
+                DrawString(left + 10, top + 8, label, enabled ? text : muted);
             };
-            const bool hasSelection = selection.active() && !selection.dragging();
-            drawEditButton(fullLeft, row0, fullRight, "SELECT", paused, selectionMode);
-            drawEditButton(fullLeft, row1, fullLeft + halfWidth, selection.liveOnly() ? "MASK: LIVE" : "MASK: RECT", paused && hasSelection, selection.liveOnly());
-            drawEditButton(rightLeft, row1, fullRight, "COPY", paused && hasSelection);
-            drawEditButton(fullLeft, row2, fullLeft + halfWidth, "CUT", paused && hasSelection);
-            drawEditButton(rightLeft, row2, fullRight, "PASTE", paused && clipboard.hasData(), pasteMode);
-            drawEditButton(fullLeft, row3, fullLeft + halfWidth, "ROTATE CCW", paused && clipboard.hasData());
-            drawEditButton(rightLeft, row3, fullRight, "ROTATE CW", paused && clipboard.hasData());
-            drawEditButton(fullLeft, row4, fullLeft + halfWidth, "FLIP H", paused && clipboard.hasData());
-            drawEditButton(rightLeft, row4, fullRight, "FLIP V", paused && clipboard.hasData());
-            drawEditButton(fullLeft, row5, fullRight, "SAVE PATTERN", paused && hasSelection);
+            editButton(fullLeft, row0, fullRight, "SELECT [V]", paused, selectionMode);
+            editButton(fullLeft, row1, fullLeft + halfWidth, "MASK [M]", selection.active(), selection.active() && selection.liveOnly());
+            editButton(rightLeft, row1, fullRight, "COPY", selection.active());
+            editButton(fullLeft, row2, fullLeft + halfWidth, "CUT", selection.active());
+            editButton(rightLeft, row2, fullRight, "PASTE", clipboard.hasData(), pasteMode);
+            editButton(fullLeft, row3, fullLeft + halfWidth, "ROT L [Q]", clipboard.hasData());
+            editButton(rightLeft, row3, fullRight, "ROT R [E]", clipboard.hasData());
+            editButton(fullLeft, row4, fullLeft + halfWidth, "FLIP H [H]", clipboard.hasData());
+            editButton(rightLeft, row4, fullRight, "FLIP V [J]", clipboard.hasData());
+            editButton(fullLeft, row5, fullRight, "SAVE PATTERN", selection.active() && !selection.dragging());
         }
 
-        DrawFormatString(PanelContentX, 940, GetColor(255, 255, 255), "Generation: %llu", static_cast<unsigned long long>(generation));
-        DrawFormatString(PanelContentX, 962, GetColor(180, 180, 190), "FPS: %.1f", fps);
-        DrawFormatString(PanelContentX, 984, GetColor(180, 180, 190), "Speed: %d gen/s", SimulationSpeeds[simulationSpeedIndex]);
+        if (panelTab == PanelTab::Pattern) {
+        DrawString(PanelContentX, 876, "ROTATION", muted);
+        const bool rotationEnabled = selectedPatternIndex != 0;
+        const unsigned int rotationButton = rotationEnabled ? section : background;
+        DrawBox(RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight, rotationButton, TRUE);
+        DrawBox(RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight, section, TRUE);
+        DrawBox(RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight, rotationButton, TRUE);
+        DrawString(RotationLeftX + 16, RotationY + 6, "<", rotationEnabled ? text : muted);
+        DrawFormatString(RotationValueX + 30, RotationY + 6, text, "R%d", patternRotation * 90);
+        DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
+        }
 
+        const char* hoverHelp = nullptr;
+        if (mouseOnPanel) {
+            for (std::size_t i = 0; i < ActionIcons.size() && hoverHelp == nullptr; ++i) {
+                const int leftX = ActionToolbarX + static_cast<int>(i) * (ActionButtonSize + ActionButtonGap);
+                if (ToolbarIcons::hit(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize)) hoverHelp = ToolbarIcons::label(ActionIcons[i]);
+            }
+            if (panelTab == PanelTab::Draw) for (std::size_t i = 0; i < ShapeIcons.size() && hoverHelp == nullptr; ++i) {
+                const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
+                if (ToolbarIcons::hit(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize)) hoverHelp = ToolbarIcons::label(ShapeIcons[i]);
+            }
+        }
+
+        DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
+        const char* defaultHelp = pasteMode
+            ? "Paste: LMB place / Q/E rotate / H/J flip / RMB or Esc cancel"
+            : (selectionMode
+                ? (selection.liveOnly() ? "Select: LMB drag / M: full rectangle" : "Select: LMB drag / M: live-cell mask")
+                : "Shape: drag LMB add / RMB erase");
+        DrawString(PanelContentX, 966, hoverHelp != nullptr ? hoverHelp : defaultHelp, muted);
+        DrawString(PanelContentX, 988, "Ctrl+C/X/V clipboard, V select, M mask, Ctrl+Z/Y", muted);
+        if (hoverHelp != nullptr) ToolbarIcons::drawTooltip(mouseX, mouseY, hoverHelp, WindowWidth, ScreenHeight);
         ScreenFlip();
 
         ++fpsFrameCount;
-        const auto fpsNow = Clock::now();
-        const double fpsElapsed = std::chrono::duration<double>(fpsNow - fpsSampleStart).count();
-        if (fpsElapsed >= 0.5) {
-            fps = fpsFrameCount / fpsElapsed;
+        const auto fpsSampleEnd = Clock::now();
+        const double fpsSampleSeconds = std::chrono::duration<double>(fpsSampleEnd - fpsSampleStart).count();
+        if (fpsSampleSeconds >= 0.5) {
+            fps = fpsFrameCount / fpsSampleSeconds;
             fpsFrameCount = 0;
-            fpsSampleStart = fpsNow;
+            fpsSampleStart = fpsSampleEnd;
         }
+
+        performanceLogger.record(fps, SimulationSpeeds[simulationSpeedIndex], generation,
+                                 board.aliveCellCount(), board.chunkCount(), paused);
 
         previousEnter = enter;
         previousSpace = space;
@@ -984,9 +1092,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         previousMouseY = mouseY;
 
         nextFrameTime += targetFrameDuration;
-        const auto now = Clock::now();
-        if (nextFrameTime > now) std::this_thread::sleep_until(nextFrameTime);
-        else if (now - nextFrameTime > targetFrameDuration * 4) nextFrameTime = now;
+        const auto afterFrame = Clock::now();
+        if (nextFrameTime > afterFrame) std::this_thread::sleep_until(nextFrameTime);
+        else nextFrameTime = afterFrame;
     }
 
     DxLib_End();
