@@ -13,12 +13,16 @@
 #include "SelectionMask.h"
 #include "SelectionClipboard.h"
 #include "ToolbarIcons.h"
+#include "TextInputDialog.h"
+#include "UserPatternLibrary.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <string>
+#include <vector>
 #include <thread>
 #include <windows.h>
 
@@ -158,6 +162,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     PatternListScroll patternListScroll;
     PerformanceLogger performanceLogger;
     EditHistory editHistory;
+    UserPatternLibrary userPatterns;
+    std::string userPatternLoadError;
+    if (!userPatterns.load(userPatternLoadError) && !userPatternLoadError.empty()) FileDialog::showError(userPatternLoadError);
     seedGlider(board);
 
     bool paused = false;
@@ -211,6 +218,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     PatternCategory toolCategory = PatternCategory::StillLife;
     int patternRotation = 0;
     PanelTab panelTab = PanelTab::Draw;
+    bool userPatternCategory = false;
+    int userPatternScrollOffset = 0;
     double simulationAccumulator = 0.0;
     double fps = 0.0;
 
@@ -231,6 +240,38 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         nextFrameTime = resetTime;
         fpsSampleStart = resetTime;
         fpsFrameCount = 0;
+    };
+
+    auto selectedLifePattern = [&]() -> LifePattern {
+        if (selectedPatternIndex < PatternLibrary::size()) return PatternLibrary::at(selectedPatternIndex);
+        const std::size_t userIndex = selectedPatternIndex - PatternLibrary::size();
+        const UserPattern& user = userPatterns.at(userIndex);
+        return {user.name.c_str(), PatternCategory::Cell, user.cells};
+    };
+
+    auto saveSelectionAsPattern = [&]() {
+        if (!selection.active() || selection.dragging()) return;
+        const auto minX = selection.minX(), minY = selection.minY();
+        const auto maxX = selection.maxX(), maxY = selection.maxY();
+        if (maxX - minX >= std::numeric_limits<int>::max() || maxY - minY >= std::numeric_limits<int>::max()) {
+            FileDialog::showError("The selected area is too large to save as a pattern.");
+            return;
+        }
+        std::vector<PatternCell> cells;
+        board.forEachAliveCellInRect(minX, minY, maxX + 1, maxY + 1,
+            [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
+                cells.push_back({static_cast<int>(x - minX), static_cast<int>(y - minY)});
+            });
+        if (cells.empty()) { FileDialog::showError("The selection does not contain any live cells."); return; }
+        std::string name;
+        if (!TextInputDialog::show(GetMainWindowHandle(), "Save User Pattern", "Pattern name:", name)) {
+            resetTimingAfterDialog();
+            return;
+        }
+        std::string errorMessage;
+        if (!userPatterns.save(name, static_cast<int>(maxX - minX + 1), static_cast<int>(maxY - minY + 1), cells, errorMessage))
+            FileDialog::showError(errorMessage);
+        resetTimingAfterDialog();
     };
 
     auto saveWithDialog = [&]() {
@@ -440,7 +481,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         if (mouseOnPanel && panelTab == PanelTab::Pattern &&
             inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) {
-            patternListScroll.scroll(toolCategory, wheel);
+            if (userPatternCategory) {
+                const int maxOffset = std::max(0, static_cast<int>(userPatterns.size()) - PatternListScroll::VisibleRows);
+                userPatternScrollOffset = std::clamp(userPatternScrollOffset - wheel, 0, maxOffset);
+            } else patternListScroll.scroll(toolCategory, wheel);
         }
 
         if (mouseOnPanel && leftPressed) {
@@ -525,6 +569,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
                     selectionMode = false;
                     selection.clear();
+                    userPatternCategory = false;
                     toolCategory = ToolCategories[i];
                     selectedPatternIndex = firstPatternInCategory(toolCategory);
                     patternRotation = 0;
@@ -536,6 +581,34 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
 
             if (!handled && panelTab == PanelTab::Pattern) {
+                const int userLeft = PanelContentX + 144, userTop = 86 + 2 * 36;
+                if (inRect(mouseX, mouseY, userLeft, userTop, userLeft + 136, userTop + 28)) {
+                    userPatternCategory = true;
+                    patternRotation = 0;
+                    selectedPatternIndex = userPatterns.size() > 0 ? PatternLibrary::size() : 0;
+                    rememberedPatternIndex = selectedPatternIndex;
+                    rememberedPatternRotation = 0;
+                    handled = true;
+                }
+            }
+
+            if (!handled && panelTab == PanelTab::Pattern && userPatternCategory) {
+                for (std::size_t i = 0; i < userPatterns.size(); ++i) {
+                    const int row = static_cast<int>(i) - userPatternScrollOffset;
+                    if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                    const int top = PatternListY + row * PatternRowHeight;
+                    if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
+                        selectedPatternIndex = PatternLibrary::size() + i;
+                        patternRotation = 0;
+                        rememberedPatternIndex = selectedPatternIndex;
+                        rememberedPatternRotation = 0;
+                        handled = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!handled && panelTab == PanelTab::Pattern && !userPatternCategory) {
                 const int scrollOffset = patternListScroll.offset(toolCategory);
                 int categoryRow = 0;
                 for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
@@ -569,6 +642,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const int row2 = row1 + EditButtonHeight + EditButtonGap;
                 const int row3 = row2 + EditButtonHeight + EditButtonGap;
                 const int row4 = row3 + EditButtonHeight + EditButtonGap;
+                const int row5 = row4 + EditButtonHeight + EditButtonGap;
                 const int halfGap = 8, halfWidth = (PanelContentWidth - halfGap) / 2;
                 const int rightLeft = fullLeft + halfWidth + halfGap;
 
@@ -605,6 +679,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     if (clipboard.hasData()) clipboard.flipHorizontal(); handled = true;
                 } else if (inRect(mouseX, mouseY, rightLeft, row4, fullRight, row4 + EditButtonHeight)) {
                     if (clipboard.hasData()) clipboard.flipVertical(); handled = true;
+                } else if (inRect(mouseX, mouseY, fullLeft, row5, fullRight, row5 + EditButtonHeight)) {
+                    if (selection.active() && !selection.dragging()) saveSelectionAsPattern();
+                    handled = true;
                 }
             }
         }
@@ -674,7 +751,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 } else {
                     cellStrokeHasLastCell = false;
                     shapeDragActive = false;
-                    const LifePattern& pattern = PatternLibrary::at(selectedPatternIndex);
+                    const LifePattern pattern = selectedLifePattern();
                     if (rightPressed) {
                         selectedPatternIndex = 0;
                         patternRotation = 0;
@@ -783,7 +860,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             DrawBox(sx0, sy0, sx1 - 1, sy1 - 1, ghostColor, FALSE);
         } else if (paused && mouseOnBoard && !middle && selectedPatternIndex != 0) {
             const auto [previewX, previewY] = camera.screenToBoard(mouseX, mouseY);
-            PatternPlacementPreview::draw(camera, PatternLibrary::at(selectedPatternIndex), previewX, previewY,
+            const LifePattern pattern = selectedLifePattern();
+            PatternPlacementPreview::draw(camera, pattern, previewX, previewY,
                                           patternRotation, BoardViewWidth, ScreenHeight);
         }
 
@@ -857,13 +935,19 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (panelTab == PanelTab::Pattern) for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
             const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
             const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
-            DrawBox(leftX, top, leftX + 136, top + 28, selectedPatternIndex != 0 && toolCategory == ToolCategories[i] ? selected : section, TRUE);
+            DrawBox(leftX, top, leftX + 136, top + 28, !userPatternCategory && selectedPatternIndex != 0 && toolCategory == ToolCategories[i] ? selected : section, TRUE);
             DrawString(leftX + 8, top + 6, PatternLibrary::categoryName(ToolCategories[i]), text);
         }
 
-        const int scrollOffset = patternListScroll.offset(toolCategory);
+        if (panelTab == PanelTab::Pattern) {
+            const int userLeft = PanelContentX + 144, userTop = 86 + 2 * 36;
+            DrawBox(userLeft, userTop, userLeft + 136, userTop + 28, userPatternCategory ? selected : section, TRUE);
+            DrawString(userLeft + 8, userTop + 6, "User", text);
+        }
+
+        const int scrollOffset = userPatternCategory ? userPatternScrollOffset : patternListScroll.offset(toolCategory);
         int categoryRow = 0;
-        if (panelTab == PanelTab::Pattern) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
+        if (panelTab == PanelTab::Pattern && !userPatternCategory) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
             const LifePattern& pattern = PatternLibrary::at(i);
             if (pattern.category != toolCategory) continue;
             if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
@@ -874,7 +958,18 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             ++categoryRow;
         }
 
-        const int patternCount = patternListScroll.count(toolCategory);
+        if (panelTab == PanelTab::Pattern && userPatternCategory) {
+            for (std::size_t i = 0; i < userPatterns.size(); ++i) {
+                const int row = static_cast<int>(i) - userPatternScrollOffset;
+                if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                const int top = PatternListY + row * PatternRowHeight;
+                const std::size_t encoded = PatternLibrary::size() + i;
+                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, selectedPatternIndex == encoded ? selected : section, TRUE);
+                DrawString(PanelContentX + 8, top + 5, userPatterns.at(i).name.c_str(), text);
+            }
+        }
+
+        const int patternCount = userPatternCategory ? static_cast<int>(userPatterns.size()) : patternListScroll.count(toolCategory);
         if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
             const int firstVisible = scrollOffset + 1;
             const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
@@ -904,6 +999,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             const int row2 = row1 + EditButtonHeight + EditButtonGap;
             const int row3 = row2 + EditButtonHeight + EditButtonGap;
             const int row4 = row3 + EditButtonHeight + EditButtonGap;
+            const int row5 = row4 + EditButtonHeight + EditButtonGap;
             const int halfGap = 8, halfWidth = (PanelContentWidth - halfGap) / 2;
             const int rightLeft = fullLeft + halfWidth + halfGap;
             auto editButton = [&](int left, int top, int right, const char* label, bool enabled, bool active = false) {
@@ -919,6 +1015,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             editButton(rightLeft, row3, fullRight, "ROT R [E]", clipboard.hasData());
             editButton(fullLeft, row4, fullLeft + halfWidth, "FLIP H [H]", clipboard.hasData());
             editButton(rightLeft, row4, fullRight, "FLIP V [J]", clipboard.hasData());
+            editButton(fullLeft, row5, fullRight, "SAVE PATTERN", selection.active() && !selection.dragging());
         }
 
         if (panelTab == PanelTab::Pattern) {

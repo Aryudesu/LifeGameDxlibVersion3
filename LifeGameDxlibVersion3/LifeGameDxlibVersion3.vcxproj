@@ -37,6 +37,8 @@
     <ClCompile Include="PatternLibrary.cpp" />
     <ClCompile Include="PatternListScroll.cpp" />
     <ClCompile Include="RleParser.cpp" />
+    <ClCompile Include="TextInputDialog.cpp" />
+    <ClCompile Include="UserPatternLibrary.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="EditHistory.h" />
@@ -53,7 +55,9 @@
     <ClInclude Include="ShapeDrawing.h" />
     <ClInclude Include="SelectionClipboard.h" />
     <ClInclude Include="SelectionMask.h" />
+    <ClInclude Include="TextInputDialog.h" />
     <ClInclude Include="ToolbarIcons.h" />
+    <ClInclude Include="UserPatternLibrary.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
