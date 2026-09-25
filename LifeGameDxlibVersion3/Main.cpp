@@ -1,6 +1,7 @@
 #include "DxLib.h"
 #include "EditHistory.h"
 #include "FileDialog.h"
+#include "FileDrop.h"
 #include "InfiniteCamera.h"
 #include "InfiniteLifeBoard.h"
 #include "InfiniteLifeFile.h"
@@ -155,7 +156,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     ChangeWindowMode(TRUE);
     SetGraphMode(WindowWidth, ScreenHeight, 32);
     SetOutApplicationLogValidFlag(FALSE);
+    FileDrop::installHook();
     if (DxLib_Init() == -1) return -1;
+    FileDrop::enable();
     SetDrawScreen(DX_SCREEN_BACK);
 
     InfiniteLifeBoard board;
@@ -262,21 +265,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         return {imported.name.c_str(), PatternCategory::Cell, imported.cells};
     };
 
-    auto importPatternWithDialog = [&]() {
-        std::string path;
-        if (!FileDialog::chooseRleImportPath(path)) {
-            resetTimingAfterDialog();
-            return;
-        }
-
-        std::size_t importedIndex = 0;
-        std::string errorMessage;
-        if (!importPatterns.importFile(path, importedIndex, errorMessage)) {
-            FileDialog::showError(errorMessage);
-            resetTimingAfterDialog();
-            return;
-        }
-
+    auto selectImportedPattern = [&](std::size_t importedIndex) {
+        panelTab = PanelTab::Pattern;
         userPatternCategory = false;
         importPatternCategory = true;
         importPatternScrollOffset = std::max(
@@ -286,6 +276,31 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         patternRotation = 0;
         rememberedPatternIndex = selectedPatternIndex;
         rememberedPatternRotation = 0;
+
+        selectionMode = false;
+        selection.clear();
+        pasteMode = false;
+        shapeDragActive = false;
+        cellStrokeHasLastCell = false;
+    };
+
+    auto importPatternFromPath = [&](const std::string& path) {
+        std::size_t importedIndex = 0;
+        std::string errorMessage;
+        if (!importPatterns.importFile(path, importedIndex, errorMessage)) {
+            FileDialog::showError(errorMessage);
+            return false;
+        }
+
+        selectImportedPattern(importedIndex);
+        return true;
+    };
+
+    auto importPatternWithDialog = [&]() {
+        std::string path;
+        if (FileDialog::chooseRleImportPath(path)) {
+            importPatternFromPath(path);
+        }
         resetTimingAfterDialog();
     };
 
@@ -297,7 +312,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         if (maxX - minX >= std::numeric_limits<int>::max() ||
             maxY - minY >= std::numeric_limits<int>::max()) {
-            // ‘I‘ğ”ÍˆÍ‚ª‘å‚«‚·‚¬‚é‚½‚ßAƒpƒ^[ƒ“‚Æ‚µ‚Ä•Û‘¶‚Å‚«‚Ü‚¹‚ñB
+            // é¸æŠç¯„å›²ãŒå¤§ãã™ãã‚‹ãŸã‚ã€ãƒ‘ã‚¿ãƒ¼ãƒ³ã¨ã—ã¦ä¿å­˜ã§ãã¾ã›ã‚“ã€‚
             FileDialog::showError(
                 "\x91\x49\x91\xF0\x94\xCD\x88\xCD"
                 "\x82\xAA\x91\xE5\x82\xAB\x82\xB7\x82\xAC\x82\xE9"
@@ -322,7 +337,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         );
 
         if (cells.empty()) {
-            // ‘I‘ğ”ÍˆÍ‚É¶‘¶ƒZƒ‹‚ª‚ ‚è‚Ü‚¹‚ñB
+            // é¸æŠç¯„å›²ã«ç”Ÿå­˜ã‚»ãƒ«ãŒã‚ã‚Šã¾ã›ã‚“ã€‚
             FileDialog::showError(
                 "\x91\x49\x91\xF0\x94\xCD\x88\xCD"
                 "\x82\xC9\x90\xB6\x91\xB6"
@@ -334,7 +349,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         std::string name;
 
-        // uƒ†[ƒU[ƒpƒ^[ƒ“‚ğ•Û‘¶vuƒpƒ^[ƒ“–¼:v
+        // ã€Œãƒ¦ãƒ¼ã‚¶ãƒ¼ãƒ‘ã‚¿ãƒ¼ãƒ³ã‚’ä¿å­˜ã€ã€Œãƒ‘ã‚¿ãƒ¼ãƒ³å:ã€
         if (!TextInputDialog::show(
             GetMainWindowHandle(),
             "\x83\x86\x81\x5B\x83\x55\x81\x5B"
@@ -394,6 +409,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const auto frameStart = Clock::now();
         const double elapsedSeconds = std::chrono::duration<double>(frameStart - previousFrameTime).count();
         previousFrameTime = frameStart;
+
+        for (const std::string& droppedPath : FileDrop::takeDroppedPaths()) {
+            importPatternFromPath(droppedPath);
+        }
 
         const bool enter = CheckHitKey(KEY_INPUT_RETURN) != 0;
         const bool space = CheckHitKey(KEY_INPUT_SPACE) != 0;
