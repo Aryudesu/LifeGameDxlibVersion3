@@ -4,6 +4,7 @@
 
 #include <shellapi.h>
 #include <windows.h>
+#include <utility>
 
 #pragma comment(lib, "Shell32.lib")
 
