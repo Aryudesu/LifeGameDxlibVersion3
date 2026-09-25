@@ -30,6 +30,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FileDialog.cpp" />
+    <ClCompile Include="ImportPatternLibrary.cpp" />
     <ClCompile Include="InfiniteCamera.cpp" />
     <ClCompile Include="InfiniteLifeBoard.cpp" />
     <ClCompile Include="InfiniteLifeFile.cpp" />
@@ -43,6 +44,7 @@
   <ItemGroup>
     <ClInclude Include="EditHistory.h" />
     <ClInclude Include="FileDialog.h" />
+    <ClInclude Include="ImportPatternLibrary.h" />
     <ClInclude Include="InfiniteCamera.h" />
     <ClInclude Include="InfiniteLifeBoard.h" />
     <ClInclude Include="InfiniteLifeFile.h" />
