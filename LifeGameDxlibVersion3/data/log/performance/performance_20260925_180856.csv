@@ -1,0 +1,5 @@
+elapsed_seconds,generation,target_gen_per_s,actual_gen_per_s,fps,alive,chunks,frame_ms,ms_per_generation,alive_per_chunk,frame_budget_usage_pct
+1.015,60,60,59.988,59.962,5,1,16.677,16.670,5.000,100.063
+2.031,121,60,60.024,60.041,5,1,16.655,16.660,5.000,99.931
+3.033,181,60,59.926,59.978,5,1,16.673,16.687,5.000,100.037
+4.035,241,60,59.876,59.738,5,1,16.740,16.701,5.000,100.439

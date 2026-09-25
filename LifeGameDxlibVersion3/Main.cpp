@@ -291,26 +291,71 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
     auto saveSelectionAsPattern = [&]() {
         if (!selection.active() || selection.dragging()) return;
+
         const auto minX = selection.minX(), minY = selection.minY();
         const auto maxX = selection.maxX(), maxY = selection.maxY();
-        if (maxX - minX >= std::numeric_limits<int>::max() || maxY - minY >= std::numeric_limits<int>::max()) {
-            FileDialog::showError("The selected area is too large to save as a pattern.");
+
+        if (maxX - minX >= std::numeric_limits<int>::max() ||
+            maxY - minY >= std::numeric_limits<int>::max()) {
+            // 選択範囲が大きすぎるため、パターンとして保存できません。
+            FileDialog::showError(
+                "\x91\x49\x91\xF0\x94\xCD\x88\xCD"
+                "\x82\xAA\x91\xE5\x82\xAB\x82\xB7\x82\xAC\x82\xE9"
+                "\x82\xBD\x82\xDF\x81\x41"
+                "\x83\x70\x83\x5E\x81\x5B\x83\x93"
+                "\x82\xC6\x82\xB5\x82\xC4"
+                "\x95\xDB\x91\xB6"
+                "\x82\xC5\x82\xAB\x82\xDC\x82\xB9\x82\xF1\x81\x42"
+            );
             return;
         }
+
         std::vector<PatternCell> cells;
-        board.forEachAliveCellInRect(minX, minY, maxX + 1, maxY + 1,
+        board.forEachAliveCellInRect(
+            minX, minY, maxX + 1, maxY + 1,
             [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) {
-                cells.push_back({static_cast<int>(x - minX), static_cast<int>(y - minY)});
-            });
-        if (cells.empty()) { FileDialog::showError("The selection does not contain any live cells."); return; }
+                cells.push_back({
+                    static_cast<int>(x - minX),
+                    static_cast<int>(y - minY)
+                    });
+            }
+        );
+
+        if (cells.empty()) {
+            // 選択範囲に生存セルがありません。
+            FileDialog::showError(
+                "\x91\x49\x91\xF0\x94\xCD\x88\xCD"
+                "\x82\xC9\x90\xB6\x91\xB6"
+                "\x83\x5A\x83\x8B"
+                "\x82\xAA\x82\xA0\x82\xE8\x82\xDC\x82\xB9\x82\xF1\x81\x42"
+            );
+            return;
+        }
+
         std::string name;
-        if (!TextInputDialog::show(GetMainWindowHandle(), "Save User Pattern", "Pattern name:", name)) {
+
+        // 「ユーザーパターンを保存」「パターン名:」
+        if (!TextInputDialog::show(
+            GetMainWindowHandle(),
+            "\x83\x86\x81\x5B\x83\x55\x81\x5B"
+            "\x83\x70\x83\x5E\x81\x5B\x83\x93"
+            "\x82\xF0\x95\xDB\x91\xB6",
+            "\x83\x70\x83\x5E\x81\x5B\x83\x93\x96\xBC\x3A",
+            name)) {
             resetTimingAfterDialog();
             return;
         }
+
         std::string errorMessage;
-        if (!userPatterns.save(name, static_cast<int>(maxX - minX + 1), static_cast<int>(maxY - minY + 1), cells, errorMessage))
+        if (!userPatterns.save(
+            name,
+            static_cast<int>(maxX - minX + 1),
+            static_cast<int>(maxY - minY + 1),
+            cells,
+            errorMessage)) {
             FileDialog::showError(errorMessage);
+        }
+
         resetTimingAfterDialog();
     };
 
