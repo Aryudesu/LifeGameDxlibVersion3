@@ -30,7 +30,7 @@ bool chooseSavePath(std::string& path) {
     dialog.lpstrFile = fileName;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrDefExt = SaveFileExtension;
-    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (GetSaveFileNameA(&dialog) == FALSE) return false;
 
@@ -48,7 +48,7 @@ bool chooseLoadPath(std::string& path) {
     dialog.lpstrFile = fileName;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrDefExt = SaveFileExtension;
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (GetOpenFileNameA(&dialog) == FALSE) return false;
 
@@ -66,7 +66,7 @@ bool chooseRleImportPath(std::string& path) {
     dialog.lpstrFile = fileName;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrDefExt = "rle";
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (GetOpenFileNameA(&dialog) == FALSE) return false;
 
