@@ -45,7 +45,13 @@ constexpr int ActionButtonY = 8;
 constexpr int ActionToolbarWidth = ActionButtonSize * 4 + ActionButtonGap * 3;
 constexpr int ActionToolbarX = WindowWidth - PanelPadding - ActionToolbarWidth;
 
-constexpr int ToolButtonY = 44;
+constexpr int PanelTabY = 44;
+constexpr int PanelTabHeight = 30;
+constexpr int PanelTabGap = 4;
+constexpr int PanelTabWidth = (PanelContentWidth - PanelTabGap * 2) / 3;
+constexpr int ToolButtonY = 92;
+constexpr int EditButtonHeight = 32;
+constexpr int EditButtonGap = 8;
 constexpr int ToolButtonSize = 34;
 constexpr int ToolButtonGap = 8;
 constexpr int ToolToolbarWidth = ToolButtonSize * 4 + ToolButtonGap * 3;
@@ -83,6 +89,9 @@ constexpr std::array ShapeIcons = {
     ToolbarIcons::Icon::Rectangle,
     ToolbarIcons::Icon::Circle
 };
+
+enum class PanelTab { Draw, Pattern, Edit };
+constexpr std::array<const char*, 3> PanelTabLabels = {"DRAW", "PATTERN", "EDIT"};
 
 constexpr std::array ToolCategories = {
     PatternCategory::StillLife,
@@ -197,8 +206,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
     std::size_t selectedPatternIndex = 0;
+    std::size_t rememberedPatternIndex = 0;
+    int rememberedPatternRotation = 0;
     PatternCategory toolCategory = PatternCategory::StillLife;
     int patternRotation = 0;
+    PanelTab panelTab = PanelTab::Draw;
     double simulationAccumulator = 0.0;
     double fps = 0.0;
 
@@ -304,6 +316,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
         if (g && !previousG) showGrid = !showGrid;
         if (v && !previousV && paused && !ctrl) {
+            panelTab = PanelTab::Edit;
+            // SELECT and PASTE are mutually exclusive edit modes.
+            // Entering SELECT must cancel an active paste preview first.
+            pasteMode = false;
             selectionMode = !selectionMode;
             shapeDragActive = false;
             cellStrokeHasLastCell = false;
@@ -368,9 +384,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (pageUp && !previousPageUp && simulationSpeedIndex + 1 < SimulationSpeeds.size()) { ++simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (pageDown && !previousPageDown && simulationSpeedIndex > 0) { --simulationSpeedIndex; simulationAccumulator = 0.0; }
         if (p && !previousP) {
+            panelTab = PanelTab::Pattern;
             selectionMode = false;
             selection.clear();
-            shapeTool = ShapeDrawing::Tool::Cell;
             shapeDragActive = false;
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
             else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
@@ -422,7 +438,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
         SetCursor(desiredCursor);
 
-        if (mouseOnPanel && inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) {
+        if (mouseOnPanel && panelTab == PanelTab::Pattern &&
+            inRect(mouseX, mouseY, PanelContentX, PatternListY, WindowWidth - PanelPadding, PatternListBottom)) {
             patternListScroll.scroll(toolCategory, wheel);
         }
 
@@ -453,7 +470,42 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 handled = true;
             }
 
-            for (std::size_t i = 0; i < ShapeTools.size() && !handled; ++i) {
+            for (int i = 0; i < 3 && !handled; ++i) {
+                const int leftX = PanelContentX + i * (PanelTabWidth + PanelTabGap);
+                if (inRect(mouseX, mouseY, leftX, PanelTabY, leftX + PanelTabWidth, PanelTabY + PanelTabHeight)) {
+                    const PanelTab previousTab = panelTab;
+                    const PanelTab nextTab = static_cast<PanelTab>(i);
+
+                    if (previousTab == PanelTab::Pattern) {
+                        rememberedPatternIndex = selectedPatternIndex;
+                        rememberedPatternRotation = patternRotation;
+                        selectedPatternIndex = 0;
+                    }
+                    if (previousTab == PanelTab::Edit && nextTab != PanelTab::Edit) {
+                        selectionMode = false;
+                        selection.clear();
+                        pasteMode = false;
+                        shapeTool = ShapeDrawing::Tool::Cell;
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
+                    }
+
+                    panelTab = nextTab;
+                    if (panelTab == PanelTab::Pattern) {
+                        selectedPatternIndex = rememberedPatternIndex;
+                        patternRotation = rememberedPatternRotation;
+                    } else {
+                        selectedPatternIndex = 0;
+                    }
+                    if (panelTab == PanelTab::Edit) {
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
+                    }
+                    handled = true;
+                }
+            }
+
+            if (panelTab == PanelTab::Draw) for (std::size_t i = 0; i < ShapeTools.size() && !handled; ++i) {
                 const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
                 if (ToolbarIcons::hit(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize)) {
                     shapeTool = ShapeTools[i];
@@ -467,22 +519,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 }
             }
 
-            for (std::size_t i = 0; i < ToolCategories.size() && !handled; ++i) {
+            if (panelTab == PanelTab::Pattern) for (std::size_t i = 0; i < ToolCategories.size() && !handled; ++i) {
                 const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
                 const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
                 if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
-                    shapeTool = ShapeDrawing::Tool::Cell;
                     selectionMode = false;
                     selection.clear();
                     toolCategory = ToolCategories[i];
                     selectedPatternIndex = firstPatternInCategory(toolCategory);
                     patternRotation = 0;
+                    rememberedPatternIndex = selectedPatternIndex;
+                    rememberedPatternRotation = patternRotation;
                     patternListScroll.ensurePatternVisible(selectedPatternIndex);
                     handled = true;
                 }
             }
 
-            if (!handled) {
+            if (!handled && panelTab == PanelTab::Pattern) {
                 const int scrollOffset = patternListScroll.offset(toolCategory);
                 int categoryRow = 0;
                 for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
@@ -491,9 +544,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
                         const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
                         if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
-                            shapeTool = ShapeDrawing::Tool::Cell;
                             selectedPatternIndex = i;
                             patternRotation = 0;
+                            rememberedPatternIndex = selectedPatternIndex;
+                            rememberedPatternRotation = patternRotation;
                             handled = true;
                             break;
                         }
@@ -502,10 +556,56 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 }
             }
 
-            if (!handled && selectedPatternIndex != 0) {
+            if (!handled && panelTab == PanelTab::Pattern && selectedPatternIndex != 0) {
                 if (inRect(mouseX, mouseY, RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 3) & 3;
                 else if (inRect(mouseX, mouseY, RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight)) patternRotation = 0;
                 else if (inRect(mouseX, mouseY, RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 1) & 3;
+            }
+
+
+            if (!handled && panelTab == PanelTab::Edit && paused) {
+                const int fullLeft = PanelContentX, fullRight = WindowWidth - PanelPadding;
+                const int row0 = 92, row1 = row0 + EditButtonHeight + EditButtonGap;
+                const int row2 = row1 + EditButtonHeight + EditButtonGap;
+                const int row3 = row2 + EditButtonHeight + EditButtonGap;
+                const int row4 = row3 + EditButtonHeight + EditButtonGap;
+                const int halfGap = 8, halfWidth = (PanelContentWidth - halfGap) / 2;
+                const int rightLeft = fullLeft + halfWidth + halfGap;
+
+                if (inRect(mouseX, mouseY, fullLeft, row0, fullRight, row0 + EditButtonHeight)) {
+                    selectionMode = !selectionMode; pasteMode = false;
+                    shapeDragActive = false; cellStrokeHasLastCell = false;
+                    if (!selectionMode) selection.clear(); handled = true;
+                } else if (inRect(mouseX, mouseY, fullLeft, row1, fullLeft + halfWidth, row1 + EditButtonHeight)) {
+                    if (selection.active() && !selection.dragging()) selection.setLiveOnly(board, !selection.liveOnly());
+                    handled = true;
+                } else if (inRect(mouseX, mouseY, rightLeft, row1, fullRight, row1 + EditButtonHeight)) {
+                    if (selection.active() && !selection.dragging()) clipboard.copy(board, selection);
+                    handled = true;
+                } else if (inRect(mouseX, mouseY, fullLeft, row2, fullLeft + halfWidth, row2 + EditButtonHeight)) {
+                    if (selection.active() && !selection.dragging() && clipboard.copy(board, selection)) {
+                        editHistory.begin();
+                        if (selection.liveOnly()) {
+                            for (const SelectionMask::Cell& cell : selection.cells()) editHistory.setAlive(board, cell.x, cell.y, false);
+                        } else {
+                            board.forEachAliveCellInRect(selection.minX(), selection.minY(), selection.maxX() + 1, selection.maxY() + 1,
+                                [&](InfiniteLifeBoard::Coord x, InfiniteLifeBoard::Coord y) { editHistory.setAlive(board, x, y, false); });
+                        }
+                        editHistory.commit(); selection.clear(); selectionMode = false; pasteMode = true;
+                    }
+                    handled = true;
+                } else if (inRect(mouseX, mouseY, rightLeft, row2, fullRight, row2 + EditButtonHeight)) {
+                    if (clipboard.hasData()) { pasteMode = true; selectionMode = false; selection.clear(); }
+                    handled = true;
+                } else if (inRect(mouseX, mouseY, fullLeft, row3, fullLeft + halfWidth, row3 + EditButtonHeight)) {
+                    if (clipboard.hasData()) clipboard.rotateCounterClockwise(); handled = true;
+                } else if (inRect(mouseX, mouseY, rightLeft, row3, fullRight, row3 + EditButtonHeight)) {
+                    if (clipboard.hasData()) clipboard.rotateClockwise(); handled = true;
+                } else if (inRect(mouseX, mouseY, fullLeft, row4, fullLeft + halfWidth, row4 + EditButtonHeight)) {
+                    if (clipboard.hasData()) clipboard.flipHorizontal(); handled = true;
+                } else if (inRect(mouseX, mouseY, rightLeft, row4, fullRight, row4 + EditButtonHeight)) {
+                    if (clipboard.hasData()) clipboard.flipVertical(); handled = true;
+                }
             }
         }
 
@@ -741,13 +841,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             ToolbarIcons::drawButton(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize, ActionIcons[i], false, enabled);
         }
 
-        for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
+        for (int i = 0; i < 3; ++i) {
+            const int leftX = PanelContentX + i * (PanelTabWidth + PanelTabGap);
+            const bool active = static_cast<int>(panelTab) == i;
+            DrawBox(leftX, PanelTabY, leftX + PanelTabWidth, PanelTabY + PanelTabHeight, active ? selected : section, TRUE);
+            DrawString(leftX + 10, PanelTabY + 7, PanelTabLabels[i], active ? text : muted);
+        }
+
+        if (panelTab == PanelTab::Draw) for (std::size_t i = 0; i < ShapeTools.size(); ++i) {
             const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
             const bool isSelected = selectedPatternIndex == 0 && shapeTool == ShapeTools[i];
             ToolbarIcons::drawButton(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize, ShapeIcons[i], isSelected, true);
         }
 
-        for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
+        if (panelTab == PanelTab::Pattern) for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
             const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
             const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
             DrawBox(leftX, top, leftX + 136, top + 28, selectedPatternIndex != 0 && toolCategory == ToolCategories[i] ? selected : section, TRUE);
@@ -756,7 +863,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
         const int scrollOffset = patternListScroll.offset(toolCategory);
         int categoryRow = 0;
-        for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
+        if (panelTab == PanelTab::Pattern) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
             const LifePattern& pattern = PatternLibrary::at(i);
             if (pattern.category != toolCategory) continue;
             if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
@@ -768,7 +875,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
 
         const int patternCount = patternListScroll.count(toolCategory);
-        if (patternCount > PatternListScroll::VisibleRows) {
+        if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
             const int firstVisible = scrollOffset + 1;
             const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
             DrawFormatString(WindowWidth - 122, PatternListBottom + 4, muted, "%d-%d / %d", firstVisible, lastVisible, patternCount);
@@ -787,9 +894,34 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawFormatString(PanelContentX, infoY + 218, text, "Undo/Redo   %llu / %llu",
                          static_cast<unsigned long long>(editHistory.undoCount()),
                          static_cast<unsigned long long>(editHistory.redoCount()));
-        DrawFormatString(PanelContentX, infoY + 242, text, "Tool        %s",
-                         selectedPatternIndex == 0 ? ShapeDrawing::toolName(shapeTool) : "Pattern");
+        const char* panelToolName = panelTab == PanelTab::Edit ? "Edit" :
+                                    (panelTab == PanelTab::Pattern ? "Pattern" : ShapeDrawing::toolName(shapeTool));
+        DrawFormatString(PanelContentX, infoY + 242, text, "Tool        %s", panelToolName);
 
+        if (panelTab == PanelTab::Edit) {
+            const int fullLeft = PanelContentX, fullRight = WindowWidth - PanelPadding;
+            const int row0 = 92, row1 = row0 + EditButtonHeight + EditButtonGap;
+            const int row2 = row1 + EditButtonHeight + EditButtonGap;
+            const int row3 = row2 + EditButtonHeight + EditButtonGap;
+            const int row4 = row3 + EditButtonHeight + EditButtonGap;
+            const int halfGap = 8, halfWidth = (PanelContentWidth - halfGap) / 2;
+            const int rightLeft = fullLeft + halfWidth + halfGap;
+            auto editButton = [&](int left, int top, int right, const char* label, bool enabled, bool active = false) {
+                DrawBox(left, top, right, top + EditButtonHeight, active ? selected : section, TRUE);
+                DrawString(left + 10, top + 8, label, enabled ? text : muted);
+            };
+            editButton(fullLeft, row0, fullRight, "SELECT [V]", paused, selectionMode);
+            editButton(fullLeft, row1, fullLeft + halfWidth, "MASK [M]", selection.active(), selection.active() && selection.liveOnly());
+            editButton(rightLeft, row1, fullRight, "COPY", selection.active());
+            editButton(fullLeft, row2, fullLeft + halfWidth, "CUT", selection.active());
+            editButton(rightLeft, row2, fullRight, "PASTE", clipboard.hasData(), pasteMode);
+            editButton(fullLeft, row3, fullLeft + halfWidth, "ROT L [Q]", clipboard.hasData());
+            editButton(rightLeft, row3, fullRight, "ROT R [E]", clipboard.hasData());
+            editButton(fullLeft, row4, fullLeft + halfWidth, "FLIP H [H]", clipboard.hasData());
+            editButton(rightLeft, row4, fullRight, "FLIP V [J]", clipboard.hasData());
+        }
+
+        if (panelTab == PanelTab::Pattern) {
         DrawString(PanelContentX, 876, "ROTATION", muted);
         const bool rotationEnabled = selectedPatternIndex != 0;
         const unsigned int rotationButton = rotationEnabled ? section : background;
@@ -799,6 +931,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         DrawString(RotationLeftX + 16, RotationY + 6, "<", rotationEnabled ? text : muted);
         DrawFormatString(RotationValueX + 30, RotationY + 6, text, "R%d", patternRotation * 90);
         DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
+        }
 
         const char* hoverHelp = nullptr;
         if (mouseOnPanel) {
@@ -806,7 +939,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const int leftX = ActionToolbarX + static_cast<int>(i) * (ActionButtonSize + ActionButtonGap);
                 if (ToolbarIcons::hit(mouseX, mouseY, leftX, ActionButtonY, ActionButtonSize)) hoverHelp = ToolbarIcons::label(ActionIcons[i]);
             }
-            for (std::size_t i = 0; i < ShapeIcons.size() && hoverHelp == nullptr; ++i) {
+            if (panelTab == PanelTab::Draw) for (std::size_t i = 0; i < ShapeIcons.size() && hoverHelp == nullptr; ++i) {
                 const int leftX = ToolToolbarX + static_cast<int>(i) * (ToolButtonSize + ToolButtonGap);
                 if (ToolbarIcons::hit(mouseX, mouseY, leftX, ToolButtonY, ToolButtonSize)) hoverHelp = ToolbarIcons::label(ShapeIcons[i]);
             }
