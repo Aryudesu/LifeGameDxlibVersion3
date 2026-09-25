@@ -12,12 +12,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/tool-panel-tabs
-      - name: Apply fix
-        run: python3 .github/scripts/fix_tab_memory.py
+      - name: Apply state transition fix
+        shell: python
+        run: |
+          exec(open('.github/scripts/fix_tab_memory.py', encoding='utf-8').read())
       - name: Commit result
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "Aryu"
+          git config user.email "suwako_a-u-@hotmail.co.jp"
           git add LifeGameDxlibVersion3/Main.cpp
           git commit -m "DRAWとPATTERNの選択状態を個別に保持"
           git push
