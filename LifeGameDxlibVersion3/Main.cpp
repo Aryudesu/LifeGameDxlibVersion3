@@ -4,6 +4,7 @@
 #include "InfiniteCamera.h"
 #include "InfiniteLifeBoard.h"
 #include "InfiniteLifeFile.h"
+#include "ImportPatternLibrary.h"
 #include "LifeStepSelfTest.h"
 #include "PatternLibrary.h"
 #include "PatternListScroll.h"
@@ -165,6 +166,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     UserPatternLibrary userPatterns;
     std::string userPatternLoadError;
     if (!userPatterns.load(userPatternLoadError) && !userPatternLoadError.empty()) FileDialog::showError(userPatternLoadError);
+    ImportPatternLibrary importPatterns;
+    std::string importPatternLoadError;
+    if (!importPatterns.load(importPatternLoadError) && !importPatternLoadError.empty()) FileDialog::showError(importPatternLoadError);
     seedGlider(board);
 
     bool paused = false;
@@ -219,7 +223,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     int patternRotation = 0;
     PanelTab panelTab = PanelTab::Draw;
     bool userPatternCategory = false;
+    bool importPatternCategory = false;
     int userPatternScrollOffset = 0;
+    int importPatternScrollOffset = 0;
     double simulationAccumulator = 0.0;
     double fps = 0.0;
 
@@ -244,9 +250,43 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
 
     auto selectedLifePattern = [&]() -> LifePattern {
         if (selectedPatternIndex < PatternLibrary::size()) return PatternLibrary::at(selectedPatternIndex);
-        const std::size_t userIndex = selectedPatternIndex - PatternLibrary::size();
-        const UserPattern& user = userPatterns.at(userIndex);
-        return {user.name.c_str(), PatternCategory::Cell, user.cells};
+
+        std::size_t externalIndex = selectedPatternIndex - PatternLibrary::size();
+        if (externalIndex < userPatterns.size()) {
+            const UserPattern& user = userPatterns.at(externalIndex);
+            return {user.name.c_str(), PatternCategory::Cell, user.cells};
+        }
+
+        externalIndex -= userPatterns.size();
+        const ImportPattern& imported = importPatterns.at(externalIndex);
+        return {imported.name.c_str(), PatternCategory::Cell, imported.cells};
+    };
+
+    auto importPatternWithDialog = [&]() {
+        std::string path;
+        if (!FileDialog::chooseRleImportPath(path)) {
+            resetTimingAfterDialog();
+            return;
+        }
+
+        std::size_t importedIndex = 0;
+        std::string errorMessage;
+        if (!importPatterns.importFile(path, importedIndex, errorMessage)) {
+            FileDialog::showError(errorMessage);
+            resetTimingAfterDialog();
+            return;
+        }
+
+        userPatternCategory = false;
+        importPatternCategory = true;
+        importPatternScrollOffset = std::max(
+            0,
+            static_cast<int>(importedIndex + 1) - PatternListScroll::VisibleRows + 1);
+        selectedPatternIndex = PatternLibrary::size() + userPatterns.size() + importedIndex;
+        patternRotation = 0;
+        rememberedPatternIndex = selectedPatternIndex;
+        rememberedPatternRotation = 0;
+        resetTimingAfterDialog();
     };
 
     auto saveSelectionAsPattern = [&]() {
@@ -484,6 +524,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             if (userPatternCategory) {
                 const int maxOffset = std::max(0, static_cast<int>(userPatterns.size()) - PatternListScroll::VisibleRows);
                 userPatternScrollOffset = std::clamp(userPatternScrollOffset - wheel, 0, maxOffset);
+            } else if (importPatternCategory) {
+                const int importRows = static_cast<int>(importPatterns.size()) + 1;
+                const int maxOffset = std::max(0, importRows - PatternListScroll::VisibleRows);
+                importPatternScrollOffset = std::clamp(importPatternScrollOffset - wheel, 0, maxOffset);
             } else patternListScroll.scroll(toolCategory, wheel);
         }
 
@@ -564,12 +608,25 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
 
             if (panelTab == PanelTab::Pattern) for (std::size_t i = 0; i < ToolCategories.size() && !handled; ++i) {
-                const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
-                const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
-                if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
+                int leftX = 0;
+                int top = 0;
+                int width = 136;
+                if (i < 4) {
+                    const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
+                    leftX = PanelContentX + column * 144;
+                    top = 86 + row * 36;
+                } else {
+                    constexpr int thirdGap = 6;
+                    constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                    leftX = PanelContentX;
+                    top = 86 + 2 * 36;
+                    width = thirdWidth;
+                }
+                if (inRect(mouseX, mouseY, leftX, top, leftX + width, top + 28)) {
                     selectionMode = false;
                     selection.clear();
                     userPatternCategory = false;
+                    importPatternCategory = false;
                     toolCategory = ToolCategories[i];
                     selectedPatternIndex = firstPatternInCategory(toolCategory);
                     patternRotation = 0;
@@ -581,11 +638,27 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
 
             if (!handled && panelTab == PanelTab::Pattern) {
-                const int userLeft = PanelContentX + 144, userTop = 86 + 2 * 36;
-                if (inRect(mouseX, mouseY, userLeft, userTop, userLeft + 136, userTop + 28)) {
+                constexpr int thirdGap = 6;
+                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                const int top = 86 + 2 * 36;
+                const int userLeft = PanelContentX + thirdWidth + thirdGap;
+                const int importLeft = PanelContentX + (thirdWidth + thirdGap) * 2;
+
+                if (inRect(mouseX, mouseY, userLeft, top, userLeft + thirdWidth, top + 28)) {
                     userPatternCategory = true;
+                    importPatternCategory = false;
                     patternRotation = 0;
                     selectedPatternIndex = userPatterns.size() > 0 ? PatternLibrary::size() : 0;
+                    rememberedPatternIndex = selectedPatternIndex;
+                    rememberedPatternRotation = 0;
+                    handled = true;
+                } else if (inRect(mouseX, mouseY, importLeft, top, importLeft + thirdWidth, top + 28)) {
+                    userPatternCategory = false;
+                    importPatternCategory = true;
+                    patternRotation = 0;
+                    selectedPatternIndex = importPatterns.size() > 0
+                        ? PatternLibrary::size() + userPatterns.size()
+                        : 0;
                     rememberedPatternIndex = selectedPatternIndex;
                     rememberedPatternRotation = 0;
                     handled = true;
@@ -608,7 +681,29 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 }
             }
 
-            if (!handled && panelTab == PanelTab::Pattern && !userPatternCategory) {
+            if (!handled && panelTab == PanelTab::Pattern && importPatternCategory) {
+                const int importRows = static_cast<int>(importPatterns.size()) + 1;
+                for (int logicalRow = 0; logicalRow < importRows; ++logicalRow) {
+                    const int row = logicalRow - importPatternScrollOffset;
+                    if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                    const int top = PatternListY + row * PatternRowHeight;
+                    if (!inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) continue;
+
+                    if (logicalRow == 0) {
+                        importPatternWithDialog();
+                    } else {
+                        const std::size_t importIndex = static_cast<std::size_t>(logicalRow - 1);
+                        selectedPatternIndex = PatternLibrary::size() + userPatterns.size() + importIndex;
+                        patternRotation = 0;
+                        rememberedPatternIndex = selectedPatternIndex;
+                        rememberedPatternRotation = 0;
+                    }
+                    handled = true;
+                    break;
+                }
+            }
+
+            if (!handled && panelTab == PanelTab::Pattern && !userPatternCategory && !importPatternCategory) {
                 const int scrollOffset = patternListScroll.offset(toolCategory);
                 int categoryRow = 0;
                 for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
@@ -933,21 +1028,43 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
 
         if (panelTab == PanelTab::Pattern) for (std::size_t i = 0; i < ToolCategories.size(); ++i) {
-            const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
-            const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
-            DrawBox(leftX, top, leftX + 136, top + 28, !userPatternCategory && selectedPatternIndex != 0 && toolCategory == ToolCategories[i] ? selected : section, TRUE);
+            int leftX = 0;
+            int top = 0;
+            int width = 136;
+            if (i < 4) {
+                const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
+                leftX = PanelContentX + column * 144;
+                top = 86 + row * 36;
+            } else {
+                constexpr int thirdGap = 6;
+                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                leftX = PanelContentX;
+                top = 86 + 2 * 36;
+                width = thirdWidth;
+            }
+            DrawBox(leftX, top, leftX + width, top + 28,
+                    !userPatternCategory && !importPatternCategory && selectedPatternIndex != 0 && toolCategory == ToolCategories[i]
+                        ? selected : section, TRUE);
             DrawString(leftX + 8, top + 6, PatternLibrary::categoryName(ToolCategories[i]), text);
         }
 
         if (panelTab == PanelTab::Pattern) {
-            const int userLeft = PanelContentX + 144, userTop = 86 + 2 * 36;
-            DrawBox(userLeft, userTop, userLeft + 136, userTop + 28, userPatternCategory ? selected : section, TRUE);
-            DrawString(userLeft + 8, userTop + 6, "User", text);
+            constexpr int thirdGap = 6;
+            constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+            const int top = 86 + 2 * 36;
+            const int userLeft = PanelContentX + thirdWidth + thirdGap;
+            const int importLeft = PanelContentX + (thirdWidth + thirdGap) * 2;
+            DrawBox(userLeft, top, userLeft + thirdWidth, top + 28, userPatternCategory ? selected : section, TRUE);
+            DrawString(userLeft + 8, top + 6, "User", text);
+            DrawBox(importLeft, top, importLeft + thirdWidth, top + 28, importPatternCategory ? selected : section, TRUE);
+            DrawString(importLeft + 8, top + 6, "Import", text);
         }
 
-        const int scrollOffset = userPatternCategory ? userPatternScrollOffset : patternListScroll.offset(toolCategory);
+        const int scrollOffset = userPatternCategory
+            ? userPatternScrollOffset
+            : (importPatternCategory ? importPatternScrollOffset : patternListScroll.offset(toolCategory));
         int categoryRow = 0;
-        if (panelTab == PanelTab::Pattern && !userPatternCategory) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
+        if (panelTab == PanelTab::Pattern && !userPatternCategory && !importPatternCategory) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
             const LifePattern& pattern = PatternLibrary::at(i);
             if (pattern.category != toolCategory) continue;
             if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
@@ -969,7 +1086,29 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
         }
 
-        const int patternCount = userPatternCategory ? static_cast<int>(userPatterns.size()) : patternListScroll.count(toolCategory);
+        if (panelTab == PanelTab::Pattern && importPatternCategory) {
+            const int importRows = static_cast<int>(importPatterns.size()) + 1;
+            for (int logicalRow = 0; logicalRow < importRows; ++logicalRow) {
+                const int row = logicalRow - importPatternScrollOffset;
+                if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                const int top = PatternListY + row * PatternRowHeight;
+                if (logicalRow == 0) {
+                    DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, section, TRUE);
+                    DrawString(PanelContentX + 8, top + 5, "+ IMPORT RLE...", text);
+                    continue;
+                }
+
+                const std::size_t importIndex = static_cast<std::size_t>(logicalRow - 1);
+                const std::size_t encoded = PatternLibrary::size() + userPatterns.size() + importIndex;
+                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24,
+                        selectedPatternIndex == encoded ? selected : section, TRUE);
+                DrawString(PanelContentX + 8, top + 5, importPatterns.at(importIndex).name.c_str(), text);
+            }
+        }
+
+        const int patternCount = userPatternCategory
+            ? static_cast<int>(userPatterns.size())
+            : (importPatternCategory ? static_cast<int>(importPatterns.size()) + 1 : patternListScroll.count(toolCategory));
         if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
             const int firstVisible = scrollOffset + 1;
             const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
