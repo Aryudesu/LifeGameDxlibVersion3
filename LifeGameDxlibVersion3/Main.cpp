@@ -206,6 +206,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     std::uint64_t generation = 0;
     std::size_t simulationSpeedIndex = DefaultSimulationSpeedIndex;
     std::size_t selectedPatternIndex = 0;
+    std::size_t rememberedPatternIndex = 0;
+    int rememberedPatternRotation = 0;
     PatternCategory toolCategory = PatternCategory::StillLife;
     int patternRotation = 0;
     PanelTab panelTab = PanelTab::Draw;
@@ -385,7 +387,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             panelTab = PanelTab::Pattern;
             selectionMode = false;
             selection.clear();
-            shapeTool = ShapeDrawing::Tool::Cell;
             shapeDragActive = false;
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
             else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
@@ -472,15 +473,33 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             for (int i = 0; i < 3 && !handled; ++i) {
                 const int leftX = PanelContentX + i * (PanelTabWidth + PanelTabGap);
                 if (inRect(mouseX, mouseY, leftX, PanelTabY, leftX + PanelTabWidth, PanelTabY + PanelTabHeight)) {
-                    panelTab = static_cast<PanelTab>(i);
-                    if (panelTab == PanelTab::Draw) {
-                        selectionMode = false; selection.clear(); pasteMode = false;
-                        selectedPatternIndex = 0; patternRotation = 0;
-                    } else if (panelTab == PanelTab::Pattern) {
-                        selectionMode = false; selection.clear(); pasteMode = false;
+                    const PanelTab previousTab = panelTab;
+                    const PanelTab nextTab = static_cast<PanelTab>(i);
+
+                    if (previousTab == PanelTab::Pattern) {
+                        rememberedPatternIndex = selectedPatternIndex;
+                        rememberedPatternRotation = patternRotation;
+                        selectedPatternIndex = 0;
+                    }
+                    if (previousTab == PanelTab::Edit && nextTab != PanelTab::Edit) {
+                        selectionMode = false;
+                        selection.clear();
+                        pasteMode = false;
+                        shapeTool = ShapeDrawing::Tool::Cell;
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
+                    }
+
+                    panelTab = nextTab;
+                    if (panelTab == PanelTab::Pattern) {
+                        selectedPatternIndex = rememberedPatternIndex;
+                        patternRotation = rememberedPatternRotation;
                     } else {
-                        selectedPatternIndex = 0; patternRotation = 0;
-                        shapeDragActive = false; cellStrokeHasLastCell = false;
+                        selectedPatternIndex = 0;
+                    }
+                    if (panelTab == PanelTab::Edit) {
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
                     }
                     handled = true;
                 }
@@ -504,12 +523,13 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const int column = static_cast<int>(i % 2), row = static_cast<int>(i / 2);
                 const int leftX = PanelContentX + column * 144, top = 86 + row * 36;
                 if (inRect(mouseX, mouseY, leftX, top, leftX + 136, top + 28)) {
-                    shapeTool = ShapeDrawing::Tool::Cell;
                     selectionMode = false;
                     selection.clear();
                     toolCategory = ToolCategories[i];
                     selectedPatternIndex = firstPatternInCategory(toolCategory);
                     patternRotation = 0;
+                    rememberedPatternIndex = selectedPatternIndex;
+                    rememberedPatternRotation = patternRotation;
                     patternListScroll.ensurePatternVisible(selectedPatternIndex);
                     handled = true;
                 }
@@ -524,9 +544,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
                         const int top = PatternListY + (categoryRow - scrollOffset) * PatternRowHeight;
                         if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
-                            shapeTool = ShapeDrawing::Tool::Cell;
                             selectedPatternIndex = i;
                             patternRotation = 0;
+                            rememberedPatternIndex = selectedPatternIndex;
+                            rememberedPatternRotation = patternRotation;
                             handled = true;
                             break;
                         }
