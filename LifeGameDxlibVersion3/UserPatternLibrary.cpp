@@ -65,7 +65,7 @@ bool UserPatternLibrary::load(std::string& errorMessage) {
     std::error_code ec;
     fs::create_directories(UserPatternDirectory, ec);
     if (ec) {
-        errorMessage = "Could not create patterns/user directory.";
+        errorMessage = "ユーザーパターン保存用フォルダー patterns/user を作成できませんでした。";
         return false;
     }
 
@@ -82,7 +82,7 @@ bool UserPatternLibrary::load(std::string& errorMessage) {
     }
     std::sort(patterns_.begin(), patterns_.end(), [](const UserPattern& a, const UserPattern& b) { return a.name < b.name; });
     if (ec) {
-        errorMessage = "Could not enumerate patterns/user directory.";
+        errorMessage = "ユーザーパターン保存用フォルダー patterns/user を読み込めませんでした。";
         return false;
     }
     return true;
@@ -92,39 +92,39 @@ bool UserPatternLibrary::save(const std::string& name, int width, int height,
                               const std::vector<PatternCell>& cells, std::string& errorMessage) {
     errorMessage.clear();
     if (!validFileName(name)) {
-        errorMessage = "Pattern name is empty or contains characters that cannot be used in a file name.";
+        errorMessage = "パターン名が空、またはファイル名に使用できない文字が含まれています。";
         return false;
     }
     if (width <= 0 || height <= 0 || cells.empty()) {
-        errorMessage = "The selection does not contain any live cells.";
+        errorMessage = "選択範囲に生存セルがありません。";
         return false;
     }
 
     std::error_code ec;
     fs::create_directories(UserPatternDirectory, ec);
     if (ec) {
-        errorMessage = "Could not create patterns/user directory.";
+        errorMessage = "ユーザーパターン保存用フォルダー patterns/user を作成できませんでした。";
         return false;
     }
     const fs::path path = UserPatternDirectory / (name + ".rle");
     if (fs::exists(path, ec)) {
-        errorMessage = "A user pattern with that name already exists.";
+        errorMessage = "同じ名前のユーザーパターンが既に存在します。";
         return false;
     }
 
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output) {
-        errorMessage = "Could not create the user pattern RLE file.";
+        errorMessage = "ユーザーパターンのRLEファイルを作成できませんでした。";
         return false;
     }
     output << encodeRle(width, height, cells);
     if (!output) {
-        errorMessage = "Failed while writing the user pattern RLE file.";
+        errorMessage = "ユーザーパターンのRLEファイルへの書き込みに失敗しました。";
         return false;
     }
     output.close();
     if (!output) {
-        errorMessage = "Failed while closing the user pattern RLE file.";
+        errorMessage = "ユーザーパターンのRLEファイルを正常に閉じられませんでした。";
         return false;
     }
     return load(errorMessage);
