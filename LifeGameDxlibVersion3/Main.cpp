@@ -315,6 +315,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (g && !previousG) showGrid = !showGrid;
         if (v && !previousV && paused && !ctrl) {
             panelTab = PanelTab::Edit;
+            // SELECT and PASTE are mutually exclusive edit modes.
+            // Entering SELECT must cancel an active paste preview first.
+            pasteMode = false;
             selectionMode = !selectionMode;
             shapeDragActive = false;
             cellStrokeHasLastCell = false;
