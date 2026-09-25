@@ -18,22 +18,14 @@ jobs:
           from pathlib import Path
           p = Path('LifeGameDxlibVersion3/Main.cpp')
           s = p.read_text(encoding='utf-8')
-          old = '''                    panelTab = static_cast<PanelTab>(i);
-                    if (panelTab == PanelTab::Draw) {
-                        selectionMode = false; selection.clear(); pasteMode = false;
-                        selectedPatternIndex = 0; patternRotation = 0;
-                    } else if (panelTab == PanelTab::Pattern) {
-                        selectionMode = false; selection.clear(); pasteMode = false;
-                    } else {
-                        selectedPatternIndex = 0; patternRotation = 0;
-                        shapeDragActive = false; cellStrokeHasLastCell = false;
-                    }
-                    handled = true;'''
+          start = s.index('                    panelTab = static_cast<PanelTab>(i);', s.index('for (int i = 0; i < 3 && !handled; ++i)'))
+          end_marker = '                    handled = true;\n'
+          end = s.index(end_marker, start) + len(end_marker)
           new = '''                    const PanelTab previousTab = panelTab;
                     panelTab = static_cast<PanelTab>(i);
 
-                    // Tool choices are persistent, but EDIT operations are temporary.
-                    // Leaving EDIT always returns board interaction to the normal Cell pen.
+                    // DRAW/PATTERN selections persist across tab switches.
+                    // EDIT operations are temporary and are cancelled on exit.
                     if (previousTab == PanelTab::Edit && panelTab != PanelTab::Edit) {
                         selectionMode = false;
                         selection.clear();
@@ -42,23 +34,17 @@ jobs:
                         shapeDragActive = false;
                         cellStrokeHasLastCell = false;
                     }
-
-                    // Do not discard the last DRAW tool or PATTERN choice merely by
-                    // visiting another tab. Only the active interaction is cancelled.
                     if (panelTab == PanelTab::Edit) {
-                        selectedPatternIndex = 0;
-                        patternRotation = 0;
                         shapeDragActive = false;
                         cellStrokeHasLastCell = false;
                     }
-                    handled = true;'''
-          if old not in s:
-              raise SystemExit('tab transition block not found')
-          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+                    handled = true;
+'''
+          p.write_text(s[:start] + new + s[end:], encoding='utf-8')
       - name: Commit result
         run: |
           git config user.name "Aryu"
           git config user.email "suwako_a-u-@hotmail.co.jp"
           git add LifeGameDxlibVersion3/Main.cpp
-          git commit -m "ツール選択を保持しEDIT離脱時はペンへ戻す"
+          git commit -m "DRAWとPATTERNのツール選択をタブ間で保持"
           git push
