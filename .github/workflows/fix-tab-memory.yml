@@ -1,0 +1,81 @@
+name: Fix tab memory
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-tab-memory.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tool-panel-tabs
+      - name: Apply tab memory fix
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('LifeGameDxlibVersion3/Main.cpp')
+          s = p.read_text(encoding='utf-8')
+
+          # PATTERN must have remembered state separate from the currently active placement.
+          decl = '    std::size_t selectedPatternIndex = 0;\n'
+          if 'rememberedPatternIndex' not in s:
+              s = s.replace(decl, decl + '    std::size_t rememberedPatternIndex = 0;\n    int rememberedPatternRotation = 0;\n', 1)
+
+          # Switching/selecting PATTERN must not destroy the DRAW tool choice.
+          s = s.replace('            shapeTool = ShapeDrawing::Tool::Cell;\n            shapeDragActive = false;\n            if (shift)', '            shapeDragActive = false;\n            if (shift)', 1)
+          s = s.replace('                    shapeTool = ShapeDrawing::Tool::Cell;\n                    selectionMode = false;\n                    selection.clear();\n                    toolCategory = ToolCategories[i];', '                    selectionMode = false;\n                    selection.clear();\n                    toolCategory = ToolCategories[i];', 1)
+          s = s.replace('                            shapeTool = ShapeDrawing::Tool::Cell;\n                            selectedPatternIndex = i;', '                            selectedPatternIndex = i;', 1)
+
+          # Remember pattern whenever the user explicitly chooses/cycles one.
+          s = s.replace('                patternListScroll.ensurePatternVisible(selectedPatternIndex);\n            }\n        }\n        if (q && !previousQ)', '                patternListScroll.ensurePatternVisible(selectedPatternIndex);\n            }\n            rememberedPatternIndex = selectedPatternIndex;\n            rememberedPatternRotation = patternRotation;\n        }\n        if (q && !previousQ)', 1)
+          s = s.replace('                    patternListScroll.ensurePatternVisible(selectedPatternIndex);\n                    handled = true;', '                    patternListScroll.ensurePatternVisible(selectedPatternIndex);\n                    rememberedPatternIndex = selectedPatternIndex;\n                    rememberedPatternRotation = patternRotation;\n                    handled = true;', 1)
+          s = s.replace('                            patternRotation = 0;\n                            handled = true;', '                            patternRotation = 0;\n                            rememberedPatternIndex = selectedPatternIndex;\n                            rememberedPatternRotation = patternRotation;\n                            handled = true;', 1)
+
+          # Replace tab transition: deactivate current PATTERN without forgetting it,
+          # and restore it when PATTERN is opened again. EDIT is temporary.
+          loop = s.index('            for (int i = 0; i < 3 && !handled; ++i) {')
+          start = s.index('                    panelTab = static_cast<PanelTab>(i);', loop)
+          end_marker = '                    handled = true;\n'
+          end = s.index(end_marker, start) + len(end_marker)
+          new = '''                    const PanelTab previousTab = panelTab;
+                    const PanelTab nextTab = static_cast<PanelTab>(i);
+
+                    if (previousTab == PanelTab::Pattern) {
+                        rememberedPatternIndex = selectedPatternIndex;
+                        rememberedPatternRotation = patternRotation;
+                        selectedPatternIndex = 0;
+                    }
+                    if (previousTab == PanelTab::Edit && nextTab != PanelTab::Edit) {
+                        selectionMode = false;
+                        selection.clear();
+                        pasteMode = false;
+                        shapeTool = ShapeDrawing::Tool::Cell;
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
+                    }
+
+                    panelTab = nextTab;
+                    if (panelTab == PanelTab::Pattern) {
+                        selectedPatternIndex = rememberedPatternIndex;
+                        patternRotation = rememberedPatternRotation;
+                    } else if (panelTab == PanelTab::Edit) {
+                        selectedPatternIndex = 0;
+                        shapeDragActive = false;
+                        cellStrokeHasLastCell = false;
+                    } else {
+                        selectedPatternIndex = 0;
+                    }
+                    handled = true;
+'''
+          s = s[:start] + new + s[end:]
+          p.write_text(s, encoding='utf-8')
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add LifeGameDxlibVersion3/Main.cpp
+          git commit -m "DRAWとPATTERNの選択状態を個別に保持"
+          git push
