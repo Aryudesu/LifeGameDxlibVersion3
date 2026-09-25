@@ -80,8 +80,6 @@ inline void draw(const InfiniteCamera& camera,
                  int rotation,
                  int boardViewWidth,
                  int boardViewHeight) {
-    if (pattern.category == PatternCategory::Cell) return;
-
     const bool valid = canPlace(pattern, originX, originY, rotation);
     const unsigned int ghostColor = valid ? GetColor(80, 210, 255) : GetColor(255, 90, 90);
     const unsigned int anchorColor = valid ? GetColor(255, 220, 90) : GetColor(255, 90, 90);
