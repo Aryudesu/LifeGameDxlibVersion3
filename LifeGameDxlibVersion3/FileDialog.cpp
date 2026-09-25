@@ -13,6 +13,8 @@ constexpr const char* SaveFileDefaultName = "LifeGame.ary3";
 constexpr const char* SaveFileExtension = "ary3";
 constexpr const char SaveFileFilter[] =
     "LifeGame Version3 (*.ary3)\0*.ary3\0All Files (*.*)\0*.*\0\0";
+constexpr const char RleFileFilter[] =
+    "Life RLE (*.rle)\0*.rle\0All Files (*.*)\0*.*\0\0";
 constexpr const char* WindowTitle = "LifeGameDxlibVersion3";
 }
 
@@ -46,6 +48,24 @@ bool chooseLoadPath(std::string& path) {
     dialog.lpstrFile = fileName;
     dialog.nMaxFile = MAX_PATH;
     dialog.lpstrDefExt = SaveFileExtension;
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+
+    if (GetOpenFileNameA(&dialog) == FALSE) return false;
+
+    path = fileName;
+    return true;
+}
+
+bool chooseRleImportPath(std::string& path) {
+    char fileName[MAX_PATH] = {};
+
+    OPENFILENAMEA dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = GetMainWindowHandle();
+    dialog.lpstrFilter = RleFileFilter;
+    dialog.lpstrFile = fileName;
+    dialog.nMaxFile = MAX_PATH;
+    dialog.lpstrDefExt = "rle";
     dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
     if (GetOpenFileNameA(&dialog) == FALSE) return false;
