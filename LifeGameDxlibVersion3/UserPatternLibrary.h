@@ -8,6 +8,7 @@
 
 struct UserPattern {
     std::string name;
+    std::string fileName;
     int width = 0;
     int height = 0;
     std::vector<PatternCell> cells;
@@ -18,6 +19,9 @@ public:
     bool load(std::string& errorMessage);
     bool save(const std::string& name, int width, int height,
               const std::vector<PatternCell>& cells, std::string& errorMessage);
+    bool rename(std::size_t index, const std::string& newName,
+                std::size_t& renamedIndex, std::string& errorMessage);
+    bool remove(std::size_t index, std::string& errorMessage);
 
     std::size_t size() const noexcept { return patterns_.size(); }
     const UserPattern& at(std::size_t index) const { return patterns_.at(index); }
