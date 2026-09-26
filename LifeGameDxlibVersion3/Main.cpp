@@ -458,6 +458,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool isImport = !isUser && selectedImportPattern(index);
         if (!isUser && !isImport) return;
 
+        const std::string oldMetadataKey = isUser ? userPatternKey(index) : importPatternKey(index);
         std::string newName = isUser ? userPatterns.at(index).name : importPatterns.at(index).name;
         if (!TextInputDialog::show(
                 GetMainWindowHandle(), "Rename Pattern", "New name:", newName)) {
@@ -476,12 +477,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             return;
         }
 
+        const std::string newMetadataKey = isUser
+            ? userPatternKey(renamedIndex)
+            : importPatternKey(renamedIndex);
+        std::string metadataError;
+        if (!patternMetadata.renameKey(oldMetadataKey, newMetadataKey, metadataError) &&
+            !metadataError.empty()) {
+            FileDialog::showError(metadataError);
+        }
+
         if (isUser) {
             selectedPatternIndex = PatternLibrary::size() + renamedIndex;
-            ensureUserPatternVisible(renamedIndex);
+            if (favoritePatternCategory) ensureFavoritePatternVisible(selectedPatternIndex);
+            else ensureUserPatternVisible(renamedIndex);
         } else {
             selectedPatternIndex = PatternLibrary::size() + userPatterns.size() + renamedIndex;
-            ensureImportPatternVisible(renamedIndex);
+            if (favoritePatternCategory) ensureFavoritePatternVisible(selectedPatternIndex);
+            else ensureImportPatternVisible(renamedIndex);
         }
         rememberedPatternIndex = selectedPatternIndex;
         rememberedPatternRotation = patternRotation;
@@ -493,6 +505,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool isUser = selectedUserPattern(index);
         const bool isImport = !isUser && selectedImportPattern(index);
         if (!isUser && !isImport) return;
+
+        const std::string metadataKey = isUser ? userPatternKey(index) : importPatternKey(index);
+        std::size_t oldFavoritePosition = 0;
+        if (favoritePatternCategory) {
+            const std::vector<std::size_t> favorites = favoritePatternIndices();
+            const auto it = std::find(favorites.begin(), favorites.end(), selectedPatternIndex);
+            if (it != favorites.end())
+                oldFavoritePosition = static_cast<std::size_t>(std::distance(favorites.begin(), it));
+        }
 
         const int answer = MessageBoxW(
             GetMainWindowHandle(),
@@ -514,7 +535,21 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             return;
         }
 
-        if (isUser) {
+        std::string metadataError;
+        if (!patternMetadata.removeKey(metadataKey, metadataError) && !metadataError.empty())
+            FileDialog::showError(metadataError);
+
+        if (favoritePatternCategory) {
+            const std::vector<std::size_t> favorites = favoritePatternIndices();
+            if (favorites.empty()) {
+                selectedPatternIndex = 0;
+                favoritePatternScrollOffset = 0;
+            } else {
+                const std::size_t next = std::min(oldFavoritePosition, favorites.size() - 1);
+                selectedPatternIndex = favorites[next];
+                ensureFavoritePatternVisible(selectedPatternIndex);
+            }
+        } else if (isUser) {
             if (userPatterns.size() == 0) {
                 selectedPatternIndex = 0;
             } else {
