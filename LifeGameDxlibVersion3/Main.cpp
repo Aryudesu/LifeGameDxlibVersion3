@@ -66,7 +66,14 @@ constexpr int ToolToolbarX = PanelContentX + (PanelContentWidth - ToolToolbarWid
 constexpr int PatternListY = 198;
 constexpr int PatternRowHeight = 28;
 constexpr int PatternListBottom = PatternListY + PatternListScroll::VisibleRows * PatternRowHeight;
-constexpr int RotationY = 900;
+constexpr int PatternManageY = 862;
+constexpr int PatternManageHeight = 28;
+constexpr int PatternManageGap = 8;
+constexpr int PatternManageButtonWidth = (PanelContentWidth - PatternManageGap) / 2;
+constexpr int PatternRenameX = PanelContentX;
+constexpr int PatternDeleteX = PanelContentX + PatternManageButtonWidth + PatternManageGap;
+constexpr int RotationLabelY = 898;
+constexpr int RotationY = 916;
 constexpr int RotationButtonWidth = 48;
 constexpr int RotationValueWidth = 104;
 constexpr int RotationGap = 8;
@@ -301,6 +308,125 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (FileDialog::chooseRleImportPath(path)) {
             importPatternFromPath(path);
         }
+        resetTimingAfterDialog();
+    };
+
+    auto selectedUserPattern = [&](std::size_t& index) {
+        if (!userPatternCategory || selectedPatternIndex < PatternLibrary::size()) return false;
+        index = selectedPatternIndex - PatternLibrary::size();
+        return index < userPatterns.size();
+    };
+
+    auto selectedImportPattern = [&](std::size_t& index) {
+        if (!importPatternCategory) return false;
+        const std::size_t importBase = PatternLibrary::size() + userPatterns.size();
+        if (selectedPatternIndex < importBase) return false;
+        index = selectedPatternIndex - importBase;
+        return index < importPatterns.size();
+    };
+
+    auto ensureUserPatternVisible = [&](std::size_t index) {
+        const int row = static_cast<int>(index);
+        if (row < userPatternScrollOffset) userPatternScrollOffset = row;
+        else if (row >= userPatternScrollOffset + PatternListScroll::VisibleRows)
+            userPatternScrollOffset = row - PatternListScroll::VisibleRows + 1;
+        const int maxOffset = std::max(0, static_cast<int>(userPatterns.size()) - PatternListScroll::VisibleRows);
+        userPatternScrollOffset = std::clamp(userPatternScrollOffset, 0, maxOffset);
+    };
+
+    auto ensureImportPatternVisible = [&](std::size_t index) {
+        const int logicalRow = static_cast<int>(index) + 1;
+        if (logicalRow < importPatternScrollOffset) importPatternScrollOffset = logicalRow;
+        else if (logicalRow >= importPatternScrollOffset + PatternListScroll::VisibleRows)
+            importPatternScrollOffset = logicalRow - PatternListScroll::VisibleRows + 1;
+        const int maxOffset = std::max(
+            0, static_cast<int>(importPatterns.size()) + 1 - PatternListScroll::VisibleRows);
+        importPatternScrollOffset = std::clamp(importPatternScrollOffset, 0, maxOffset);
+    };
+
+    auto renameSelectedPattern = [&]() {
+        std::size_t index = 0;
+        const bool isUser = selectedUserPattern(index);
+        const bool isImport = !isUser && selectedImportPattern(index);
+        if (!isUser && !isImport) return;
+
+        std::string newName = isUser ? userPatterns.at(index).name : importPatterns.at(index).name;
+        if (!TextInputDialog::show(
+                GetMainWindowHandle(), "Rename Pattern", "New name:", newName)) {
+            resetTimingAfterDialog();
+            return;
+        }
+
+        std::size_t renamedIndex = 0;
+        std::string errorMessage;
+        const bool renamed = isUser
+            ? userPatterns.rename(index, newName, renamedIndex, errorMessage)
+            : importPatterns.rename(index, newName, renamedIndex, errorMessage);
+        if (!renamed) {
+            FileDialog::showError(errorMessage);
+            resetTimingAfterDialog();
+            return;
+        }
+
+        if (isUser) {
+            selectedPatternIndex = PatternLibrary::size() + renamedIndex;
+            ensureUserPatternVisible(renamedIndex);
+        } else {
+            selectedPatternIndex = PatternLibrary::size() + userPatterns.size() + renamedIndex;
+            ensureImportPatternVisible(renamedIndex);
+        }
+        rememberedPatternIndex = selectedPatternIndex;
+        rememberedPatternRotation = patternRotation;
+        resetTimingAfterDialog();
+    };
+
+    auto deleteSelectedPattern = [&]() {
+        std::size_t index = 0;
+        const bool isUser = selectedUserPattern(index);
+        const bool isImport = !isUser && selectedImportPattern(index);
+        if (!isUser && !isImport) return;
+
+        const int answer = MessageBoxW(
+            GetMainWindowHandle(),
+            L"\u9078\u629e\u3057\u305f\u30d1\u30bf\u30fc\u30f3\u3092\u524a\u9664\u3057\u307e\u3059\u304b\uff1f\n\u3053\u306e\u64cd\u4f5c\u306f\u53d6\u308a\u6d88\u305b\u307e\u305b\u3093\u3002",
+            L"\u30d1\u30bf\u30fc\u30f3\u306e\u524a\u9664",
+            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+        if (answer != IDYES) {
+            resetTimingAfterDialog();
+            return;
+        }
+
+        std::string errorMessage;
+        const bool removed = isUser
+            ? userPatterns.remove(index, errorMessage)
+            : importPatterns.remove(index, errorMessage);
+        if (!removed) {
+            FileDialog::showError(errorMessage);
+            resetTimingAfterDialog();
+            return;
+        }
+
+        if (isUser) {
+            if (userPatterns.size() == 0) {
+                selectedPatternIndex = 0;
+            } else {
+                const std::size_t next = std::min(index, userPatterns.size() - 1);
+                selectedPatternIndex = PatternLibrary::size() + next;
+                ensureUserPatternVisible(next);
+            }
+        } else {
+            if (importPatterns.size() == 0) {
+                selectedPatternIndex = 0;
+            } else {
+                const std::size_t next = std::min(index, importPatterns.size() - 1);
+                selectedPatternIndex = PatternLibrary::size() + userPatterns.size() + next;
+                ensureImportPatternVisible(next);
+            }
+        }
+
+        patternRotation = 0;
+        rememberedPatternIndex = selectedPatternIndex;
+        rememberedPatternRotation = 0;
         resetTimingAfterDialog();
     };
 
@@ -788,6 +914,24 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 }
             }
 
+            if (!handled && panelTab == PanelTab::Pattern) {
+                std::size_t managedIndex = 0;
+                const bool canManage = selectedUserPattern(managedIndex) || selectedImportPattern(managedIndex);
+                if (canManage && inRect(
+                        mouseX, mouseY,
+                        PatternRenameX, PatternManageY,
+                        PatternRenameX + PatternManageButtonWidth, PatternManageY + PatternManageHeight)) {
+                    renameSelectedPattern();
+                    handled = true;
+                } else if (canManage && inRect(
+                        mouseX, mouseY,
+                        PatternDeleteX, PatternManageY,
+                        PatternDeleteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight)) {
+                    deleteSelectedPattern();
+                    handled = true;
+                }
+            }
+
             if (!handled && panelTab == PanelTab::Pattern && selectedPatternIndex != 0) {
                 if (inRect(mouseX, mouseY, RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight)) patternRotation = (patternRotation + 3) & 3;
                 else if (inRect(mouseX, mouseY, RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight)) patternRotation = 0;
@@ -1236,15 +1380,26 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         }
 
         if (panelTab == PanelTab::Pattern) {
-        DrawString(PanelContentX, 876, "ROTATION", muted);
-        const bool rotationEnabled = selectedPatternIndex != 0;
-        const unsigned int rotationButton = rotationEnabled ? section : background;
-        DrawBox(RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight, rotationButton, TRUE);
-        DrawBox(RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight, section, TRUE);
-        DrawBox(RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight, rotationButton, TRUE);
-        DrawString(RotationLeftX + 16, RotationY + 6, "<", rotationEnabled ? text : muted);
-        DrawFormatString(RotationValueX + 30, RotationY + 6, text, "R%d", patternRotation * 90);
-        DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
+            std::size_t managedIndex = 0;
+            const bool canManage = selectedUserPattern(managedIndex) || selectedImportPattern(managedIndex);
+            DrawBox(PatternRenameX, PatternManageY,
+                    PatternRenameX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
+                    canManage ? section : background, TRUE);
+            DrawBox(PatternDeleteX, PatternManageY,
+                    PatternDeleteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
+                    canManage ? section : background, TRUE);
+            DrawString(PatternRenameX + 10, PatternManageY + 6, "RENAME", canManage ? text : muted);
+            DrawString(PatternDeleteX + 10, PatternManageY + 6, "DELETE", canManage ? text : muted);
+
+            DrawString(PanelContentX, RotationLabelY, "ROTATION", muted);
+            const bool rotationEnabled = selectedPatternIndex != 0;
+            const unsigned int rotationButton = rotationEnabled ? section : background;
+            DrawBox(RotationLeftX, RotationY, RotationLeftX + RotationButtonWidth, RotationY + RotationHeight, rotationButton, TRUE);
+            DrawBox(RotationValueX, RotationY, RotationValueX + RotationValueWidth, RotationY + RotationHeight, section, TRUE);
+            DrawBox(RotationRightX, RotationY, RotationRightX + RotationButtonWidth, RotationY + RotationHeight, rotationButton, TRUE);
+            DrawString(RotationLeftX + 16, RotationY + 6, "<", rotationEnabled ? text : muted);
+            DrawFormatString(RotationValueX + 30, RotationY + 6, text, "R%d", patternRotation * 90);
+            DrawString(RotationRightX + 17, RotationY + 6, ">", rotationEnabled ? text : muted);
         }
 
         const char* hoverHelp = nullptr;
@@ -1259,14 +1414,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
         }
 
-        DrawString(PanelContentX, 944, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
+        DrawString(PanelContentX, 952, paused ? "PAUSED" : "RUNNING", paused ? GetColor(255, 210, 90) : GetColor(120, 230, 140));
         const char* defaultHelp = pasteMode
             ? "Paste: LMB place / Q/E rotate / H/J flip / RMB or Esc cancel"
             : (selectionMode
                 ? (selection.liveOnly() ? "Select: LMB drag / M: full rectangle" : "Select: LMB drag / M: live-cell mask")
                 : "Shape: drag LMB add / RMB erase");
-        DrawString(PanelContentX, 966, hoverHelp != nullptr ? hoverHelp : defaultHelp, muted);
-        DrawString(PanelContentX, 988, "Ctrl+C/X/V clipboard, V select, M mask, Ctrl+Z/Y", muted);
+        DrawString(PanelContentX, 974, hoverHelp != nullptr ? hoverHelp : defaultHelp, muted);
+        DrawString(PanelContentX, 996, "Ctrl+C/X/V clipboard, V select, M mask, Ctrl+Z/Y", muted);
         if (hoverHelp != nullptr) ToolbarIcons::drawTooltip(mouseX, mouseY, hoverHelp, WindowWidth, ScreenHeight);
         ScreenFlip();
 
