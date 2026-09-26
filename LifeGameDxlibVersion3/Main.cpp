@@ -861,6 +861,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const int importRows = static_cast<int>(importPatterns.size()) + 1;
                 const int maxOffset = std::max(0, importRows - PatternListScroll::VisibleRows);
                 importPatternScrollOffset = std::clamp(importPatternScrollOffset - wheel, 0, maxOffset);
+            } else if (favoritePatternCategory) {
+                const int count = static_cast<int>(favoritePatternIndices().size());
+                const int maxOffset = std::max(0, count - PatternListScroll::VisibleRows);
+                favoritePatternScrollOffset = std::clamp(favoritePatternScrollOffset - wheel, 0, maxOffset);
             } else patternListScroll.scroll(toolCategory, wheel);
         }
 
@@ -949,8 +953,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     leftX = PanelContentX + column * 144;
                     top = 86 + row * 36;
                 } else {
-                    constexpr int thirdGap = 6;
-                    constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                    constexpr int thirdGap = 4;
+                    constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
                     leftX = PanelContentX;
                     top = 86 + 2 * 36;
                     width = thirdWidth;
@@ -960,6 +964,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     selection.clear();
                     userPatternCategory = false;
                     importPatternCategory = false;
+                    favoritePatternCategory = false;
                     toolCategory = ToolCategories[i];
                     selectedPatternIndex = firstPatternInCategory(toolCategory);
                     patternRotation = 0;
@@ -971,15 +976,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
 
             if (!handled && panelTab == PanelTab::Pattern) {
-                constexpr int thirdGap = 6;
-                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                constexpr int thirdGap = 4;
+                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
                 const int top = 86 + 2 * 36;
                 const int userLeft = PanelContentX + thirdWidth + thirdGap;
                 const int importLeft = PanelContentX + (thirdWidth + thirdGap) * 2;
+                const int favoriteLeft = PanelContentX + (thirdWidth + thirdGap) * 3;
 
                 if (inRect(mouseX, mouseY, userLeft, top, userLeft + thirdWidth, top + 28)) {
                     userPatternCategory = true;
                     importPatternCategory = false;
+                    favoritePatternCategory = false;
                     patternRotation = 0;
                     selectedPatternIndex = userPatterns.size() > 0 ? PatternLibrary::size() : 0;
                     rememberedPatternIndex = selectedPatternIndex;
@@ -988,10 +995,22 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 } else if (inRect(mouseX, mouseY, importLeft, top, importLeft + thirdWidth, top + 28)) {
                     userPatternCategory = false;
                     importPatternCategory = true;
+                    favoritePatternCategory = false;
                     patternRotation = 0;
                     selectedPatternIndex = importPatterns.size() > 0
                         ? PatternLibrary::size() + userPatterns.size()
                         : 0;
+                    rememberedPatternIndex = selectedPatternIndex;
+                    rememberedPatternRotation = 0;
+                    handled = true;
+                } else if (inRect(mouseX, mouseY, favoriteLeft, top, favoriteLeft + thirdWidth, top + 28)) {
+                    userPatternCategory = false;
+                    importPatternCategory = false;
+                    favoritePatternCategory = true;
+                    patternRotation = 0;
+                    const std::vector<std::size_t> favorites = favoritePatternIndices();
+                    selectedPatternIndex = favorites.empty() ? 0 : favorites.front();
+                    favoritePatternScrollOffset = 0;
                     rememberedPatternIndex = selectedPatternIndex;
                     rememberedPatternRotation = 0;
                     handled = true;
@@ -1036,7 +1055,25 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 }
             }
 
-            if (!handled && panelTab == PanelTab::Pattern && !userPatternCategory && !importPatternCategory) {
+            if (!handled && panelTab == PanelTab::Pattern && favoritePatternCategory) {
+                const std::vector<std::size_t> favorites = favoritePatternIndices();
+                for (std::size_t i = 0; i < favorites.size(); ++i) {
+                    const int row = static_cast<int>(i) - favoritePatternScrollOffset;
+                    if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                    const int top = PatternListY + row * PatternRowHeight;
+                    if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
+                        selectedPatternIndex = favorites[i];
+                        patternRotation = 0;
+                        rememberedPatternIndex = selectedPatternIndex;
+                        rememberedPatternRotation = 0;
+                        handled = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!handled && panelTab == PanelTab::Pattern &&
+                !userPatternCategory && !importPatternCategory && !favoritePatternCategory) {
                 const int scrollOffset = patternListScroll.offset(toolCategory);
                 int categoryRow = 0;
                 for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
