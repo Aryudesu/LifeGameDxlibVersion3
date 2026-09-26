@@ -28,6 +28,14 @@ bool isRleExtension(const fs::path& path) {
     return extension == ".rle";
 }
 
+bool validFileName(const std::string& name) {
+    if (name.empty() || name == "." || name == "..") return false;
+    static constexpr const char* Invalid = "\\/:*?\"<>|";
+    if (name.find_first_of(Invalid) != std::string::npos) return false;
+    if (name.back() == ' ' || name.back() == '.') return false;
+    return true;
+}
+
 std::string localizedParseError(const std::string& error) {
     if (error == "Failed to open the RLE file.")
         return ansiFromWide(L"RLE\u30D5\u30A1\u30A4\u30EB\u3092\u958B\u3051\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
@@ -64,7 +72,8 @@ bool readPattern(const fs::path& path, ImportPattern& pattern, std::string& pars
     ParsedRlePattern parsed;
     if (!RleParser::parse(source, parsed, parseError)) return false;
 
-    pattern = {path.stem().string(), parsed.width, parsed.height, std::move(parsed.cells)};
+    pattern = {path.stem().string(), path.filename().string(),
+               parsed.width, parsed.height, std::move(parsed.cells)};
     return true;
 }
 }
@@ -168,4 +177,66 @@ bool ImportPatternLibrary::importFile(const std::string& sourcePath, std::size_t
     errorMessage = ansiFromWide(
         L"\u518D\u8AAD\u307F\u8FBC\u307F\u5F8C\u306B\u30A4\u30F3\u30DD\u30FC\u30C8\u3057\u305F\u30D1\u30BF\u30FC\u30F3\u3092\u898B\u3064\u3051\u3089\u308C\u307E\u305B\u3093\u3067\u3057\u305F\u3002");
     return false;
+}
+
+
+bool ImportPatternLibrary::rename(std::size_t index, const std::string& newName,
+                                  std::size_t& renamedIndex, std::string& errorMessage) {
+    errorMessage.clear();
+    if (index >= patterns_.size()) {
+        errorMessage = ansiFromWide(L"\u9078\u629e\u3055\u308c\u305f\u30d1\u30bf\u30fc\u30f3\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3002");
+        return false;
+    }
+    if (!validFileName(newName)) {
+        errorMessage = ansiFromWide(L"\u30d1\u30bf\u30fc\u30f3\u540d\u304c\u7a7a\u3001\u307e\u305f\u306f\u30d5\u30a1\u30a4\u30eb\u540d\u306b\u4f7f\u7528\u3067\u304d\u306a\u3044\u6587\u5b57\u304c\u542b\u307e\u308c\u3066\u3044\u307e\u3059\u3002");
+        return false;
+    }
+
+    const fs::path source = ImportPatternDirectory / patterns_[index].fileName;
+    const fs::path destination = ImportPatternDirectory / (newName + source.extension().string());
+    std::error_code ec;
+    if (source == destination) {
+        renamedIndex = index;
+        return true;
+    }
+    if (fs::exists(destination, ec)) {
+        errorMessage = ansiFromWide(L"\u540c\u3058\u540d\u524d\u306e\u30a4\u30f3\u30dd\u30fc\u30c8\u6e08\u307f\u30d1\u30bf\u30fc\u30f3\u304c\u65e2\u306b\u5b58\u5728\u3057\u307e\u3059\u3002");
+        return false;
+    }
+    if (ec) {
+        errorMessage = ansiFromWide(L"\u5909\u66f4\u5148\u306e\u30d5\u30a1\u30a4\u30eb\u540d\u3092\u78ba\u8a8d\u3067\u304d\u307e\u305b\u3093\u3067\u3057\u305f\u3002");
+        return false;
+    }
+
+    fs::rename(source, destination, ec);
+    if (ec) {
+        errorMessage = ansiFromWide(L"\u30d1\u30bf\u30fc\u30f3\u306e\u540d\u524d\u5909\u66f4\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002");
+        return false;
+    }
+    if (!load(errorMessage)) return false;
+
+    for (std::size_t i = 0; i < patterns_.size(); ++i) {
+        if (patterns_[i].name == newName) {
+            renamedIndex = i;
+            return true;
+        }
+    }
+    errorMessage = ansiFromWide(L"\u540d\u524d\u5909\u66f4\u5f8c\u306e\u30d1\u30bf\u30fc\u30f3\u3092\u898b\u3064\u3051\u3089\u308c\u307e\u305b\u3093\u3067\u3057\u305f\u3002");
+    return false;
+}
+
+bool ImportPatternLibrary::remove(std::size_t index, std::string& errorMessage) {
+    errorMessage.clear();
+    if (index >= patterns_.size()) {
+        errorMessage = ansiFromWide(L"\u9078\u629e\u3055\u308c\u305f\u30d1\u30bf\u30fc\u30f3\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3002");
+        return false;
+    }
+
+    const fs::path path = ImportPatternDirectory / patterns_[index].fileName;
+    std::error_code ec;
+    if (!fs::remove(path, ec) || ec) {
+        errorMessage = ansiFromWide(L"\u30d1\u30bf\u30fc\u30f3\u306e\u524a\u9664\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002");
+        return false;
+    }
+    return load(errorMessage);
 }
