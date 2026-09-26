@@ -802,6 +802,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             selectionMode = false;
             selection.clear();
             shapeDragActive = false;
+            userPatternCategory = false;
+            importPatternCategory = false;
+            favoritePatternCategory = false;
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
             else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
             patternRotation = 0;
@@ -1098,6 +1101,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 std::size_t managedIndex = 0;
                 const bool canManage = selectedUserPattern(managedIndex) || selectedImportPattern(managedIndex);
                 if (canManage && inRect(
+                        mouseX, mouseY,
+                        PatternFavoriteX, PatternManageY,
+                        PatternFavoriteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight)) {
+                    toggleSelectedFavorite();
+                    handled = true;
+                } else if (canManage && inRect(
                         mouseX, mouseY,
                         PatternRenameX, PatternManageY,
                         PatternRenameX + PatternManageButtonWidth, PatternManageY + PatternManageHeight)) {
