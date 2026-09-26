@@ -283,6 +283,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         panelTab = PanelTab::Pattern;
         userPatternCategory = false;
         importPatternCategory = true;
+        favoritePatternCategory = false;
         importPatternScrollOffset = std::max(
             0,
             static_cast<int>(importedIndex + 1) - PatternListScroll::VisibleRows + 1);
@@ -1433,35 +1434,43 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 leftX = PanelContentX + column * 144;
                 top = 86 + row * 36;
             } else {
-                constexpr int thirdGap = 6;
-                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                constexpr int thirdGap = 4;
+                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
                 leftX = PanelContentX;
                 top = 86 + 2 * 36;
                 width = thirdWidth;
             }
             DrawBox(leftX, top, leftX + width, top + 28,
-                    !userPatternCategory && !importPatternCategory && selectedPatternIndex != 0 && toolCategory == ToolCategories[i]
+                    !userPatternCategory && !importPatternCategory && !favoritePatternCategory &&
+                    selectedPatternIndex != 0 && toolCategory == ToolCategories[i]
                         ? selected : section, TRUE);
             DrawString(leftX + 8, top + 6, PatternLibrary::categoryName(ToolCategories[i]), text);
         }
 
         if (panelTab == PanelTab::Pattern) {
-            constexpr int thirdGap = 6;
-            constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+            constexpr int thirdGap = 4;
+            constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
             const int top = 86 + 2 * 36;
             const int userLeft = PanelContentX + thirdWidth + thirdGap;
             const int importLeft = PanelContentX + (thirdWidth + thirdGap) * 2;
+            const int favoriteLeft = PanelContentX + (thirdWidth + thirdGap) * 3;
             DrawBox(userLeft, top, userLeft + thirdWidth, top + 28, userPatternCategory ? selected : section, TRUE);
-            DrawString(userLeft + 8, top + 6, "User", text);
+            DrawString(userLeft + 7, top + 6, "User", text);
             DrawBox(importLeft, top, importLeft + thirdWidth, top + 28, importPatternCategory ? selected : section, TRUE);
-            DrawString(importLeft + 8, top + 6, "Import", text);
+            DrawString(importLeft + 5, top + 6, "Import", text);
+            DrawBox(favoriteLeft, top, favoriteLeft + thirdWidth, top + 28, favoritePatternCategory ? selected : section, TRUE);
+            DrawString(favoriteLeft + 13, top + 6, "Fav", text);
         }
 
         const int scrollOffset = userPatternCategory
             ? userPatternScrollOffset
-            : (importPatternCategory ? importPatternScrollOffset : patternListScroll.offset(toolCategory));
+            : (importPatternCategory
+                ? importPatternScrollOffset
+                : (favoritePatternCategory ? favoritePatternScrollOffset : patternListScroll.offset(toolCategory)));
         int categoryRow = 0;
-        if (panelTab == PanelTab::Pattern && !userPatternCategory && !importPatternCategory) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
+        if (panelTab == PanelTab::Pattern &&
+            !userPatternCategory && !importPatternCategory && !favoritePatternCategory)
+            for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
             const LifePattern& pattern = PatternLibrary::at(i);
             if (pattern.category != toolCategory) continue;
             if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
@@ -1480,6 +1489,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const std::size_t encoded = PatternLibrary::size() + i;
                 DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, selectedPatternIndex == encoded ? selected : section, TRUE);
                 DrawString(PanelContentX + 8, top + 5, userPatterns.at(i).name.c_str(), text);
+                if (patternMetadata.isFavorite(userPatternKey(i)))
+                    DrawString(WindowWidth - PanelPadding - 16, top + 5, "*", text);
             }
         }
 
@@ -1500,6 +1511,24 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24,
                         selectedPatternIndex == encoded ? selected : section, TRUE);
                 DrawString(PanelContentX + 8, top + 5, importPatterns.at(importIndex).name.c_str(), text);
+                if (patternMetadata.isFavorite(importPatternKey(importIndex)))
+                    DrawString(WindowWidth - PanelPadding - 16, top + 5, "*", text);
+            }
+        }
+
+        if (panelTab == PanelTab::Pattern && favoritePatternCategory) {
+            const std::vector<std::size_t> favorites = favoritePatternIndices();
+            const std::size_t importBase = PatternLibrary::size() + userPatterns.size();
+            for (std::size_t i = 0; i < favorites.size(); ++i) {
+                const int row = static_cast<int>(i) - favoritePatternScrollOffset;
+                if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                const int top = PatternListY + row * PatternRowHeight;
+                const std::size_t encoded = favorites[i];
+                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24,
+                        selectedPatternIndex == encoded ? selected : section, TRUE);
+                const char* source = encoded < importBase ? "U" : "I";
+                DrawFormatString(PanelContentX + 8, top + 5, text, "[%s] %s",
+                                 source, externalPatternName(encoded).c_str());
             }
         }
 
@@ -1517,7 +1546,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         } else {
             const int patternCount = userPatternCategory
                 ? static_cast<int>(userPatterns.size())
-                : patternListScroll.count(toolCategory);
+                : (favoritePatternCategory
+                    ? static_cast<int>(favoritePatternIndices().size())
+                    : patternListScroll.count(toolCategory));
             if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
                 const int firstVisible = scrollOffset + 1;
                 const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
@@ -1571,14 +1602,21 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (panelTab == PanelTab::Pattern) {
             std::size_t managedIndex = 0;
             const bool canManage = selectedUserPattern(managedIndex) || selectedImportPattern(managedIndex);
+            std::string metadataKey;
+            const bool favorite = canManage && selectedPatternMetadataKey(metadataKey) &&
+                                  patternMetadata.isFavorite(metadataKey);
+            DrawBox(PatternFavoriteX, PatternManageY,
+                    PatternFavoriteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
+                    favorite ? selected : (canManage ? section : background), TRUE);
             DrawBox(PatternRenameX, PatternManageY,
                     PatternRenameX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
                     canManage ? section : background, TRUE);
             DrawBox(PatternDeleteX, PatternManageY,
                     PatternDeleteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
                     canManage ? section : background, TRUE);
-            DrawString(PatternRenameX + 10, PatternManageY + 6, "RENAME", canManage ? text : muted);
-            DrawString(PatternDeleteX + 10, PatternManageY + 6, "DELETE", canManage ? text : muted);
+            DrawString(PatternFavoriteX + 8, PatternManageY + 6, favorite ? "* FAV" : "FAV", canManage ? text : muted);
+            DrawString(PatternRenameX + 8, PatternManageY + 6, "RENAME", canManage ? text : muted);
+            DrawString(PatternDeleteX + 8, PatternManageY + 6, "DELETE", canManage ? text : muted);
 
             DrawString(PanelContentX, RotationLabelY, "ROTATION", muted);
             const bool rotationEnabled = selectedPatternIndex != 0;
