@@ -17,8 +17,9 @@ std::string ansiFromWide(const wchar_t* text) {
     const int size = WideCharToMultiByte(CP_ACP, 0, text, -1, nullptr, 0, nullptr, nullptr);
     if (size <= 1) return {};
 
-    std::string result(static_cast<std::size_t>(size - 1), '\0');
+    std::string result(static_cast<std::size_t>(size), '\0');
     WideCharToMultiByte(CP_ACP, 0, text, -1, result.data(), size, nullptr, nullptr);
+    result.pop_back();
     return result;
 }
 
