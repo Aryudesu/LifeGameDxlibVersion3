@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -84,7 +85,7 @@ public:
         bool sawVersion = false;
         bool sawPatterns = false;
         skipSpace();
-        if (consume('}')) return true;
+        if (consume('}')) return false;
 
         while (true) {
             std::wstring key;
