@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <string_view>
+#include <utility>
 #include <windows.h>
 
 namespace {
@@ -107,7 +108,7 @@ public:
         }
 
         skipSpace();
-        return pos_ == text_.size() && (!sawVersion || sawPatterns);
+        return pos_ == text_.size() && sawVersion && sawPatterns;
     }
 
 private:
