@@ -9,6 +9,7 @@
 #include "LifeStepSelfTest.h"
 #include "PatternLibrary.h"
 #include "PatternListScroll.h"
+#include "PatternMetadataStore.h"
 #include "PatternPlacementPreview.h"
 #include "PerformanceLogger.h"
 #include "ShapeDrawing.h"
@@ -23,6 +24,7 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <iterator>
 #include <string>
 #include <vector>
 #include <thread>
@@ -68,10 +70,11 @@ constexpr int PatternRowHeight = 28;
 constexpr int PatternListBottom = PatternListY + PatternListScroll::VisibleRows * PatternRowHeight;
 constexpr int PatternManageY = 862;
 constexpr int PatternManageHeight = 28;
-constexpr int PatternManageGap = 8;
-constexpr int PatternManageButtonWidth = (PanelContentWidth - PatternManageGap) / 2;
-constexpr int PatternRenameX = PanelContentX;
-constexpr int PatternDeleteX = PanelContentX + PatternManageButtonWidth + PatternManageGap;
+constexpr int PatternManageGap = 6;
+constexpr int PatternManageButtonWidth = (PanelContentWidth - PatternManageGap * 2) / 3;
+constexpr int PatternFavoriteX = PanelContentX;
+constexpr int PatternRenameX = PatternFavoriteX + PatternManageButtonWidth + PatternManageGap;
+constexpr int PatternDeleteX = PatternRenameX + PatternManageButtonWidth + PatternManageGap;
 constexpr int RotationLabelY = 898;
 constexpr int RotationY = 916;
 constexpr int RotationButtonWidth = 48;
@@ -179,6 +182,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     ImportPatternLibrary importPatterns;
     std::string importPatternLoadError;
     if (!importPatterns.load(importPatternLoadError) && !importPatternLoadError.empty()) FileDialog::showError(importPatternLoadError);
+    PatternMetadataStore patternMetadata;
+    std::string patternMetadataLoadError;
+    if (!patternMetadata.load(patternMetadataLoadError) && !patternMetadataLoadError.empty()) FileDialog::showError(patternMetadataLoadError);
     seedGlider(board);
 
     bool paused = false;
@@ -234,8 +240,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     PanelTab panelTab = PanelTab::Draw;
     bool userPatternCategory = false;
     bool importPatternCategory = false;
+    bool favoritePatternCategory = false;
     int userPatternScrollOffset = 0;
     int importPatternScrollOffset = 0;
+    int favoritePatternScrollOffset = 0;
     double simulationAccumulator = 0.0;
     double fps = 0.0;
 
@@ -276,6 +284,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         panelTab = PanelTab::Pattern;
         userPatternCategory = false;
         importPatternCategory = true;
+        favoritePatternCategory = false;
         importPatternScrollOffset = std::max(
             0,
             static_cast<int>(importedIndex + 1) - PatternListScroll::VisibleRows + 1);
@@ -311,18 +320,68 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         resetTimingAfterDialog();
     };
 
+    auto userPatternKey = [&](std::size_t index) {
+        return std::string("user/") + userPatterns.at(index).fileName;
+    };
+
+    auto importPatternKey = [&](std::size_t index) {
+        return std::string("import/") + importPatterns.at(index).fileName;
+    };
+
     auto selectedUserPattern = [&](std::size_t& index) {
-        if (!userPatternCategory || selectedPatternIndex < PatternLibrary::size()) return false;
+        if (selectedPatternIndex < PatternLibrary::size()) return false;
         index = selectedPatternIndex - PatternLibrary::size();
         return index < userPatterns.size();
     };
 
     auto selectedImportPattern = [&](std::size_t& index) {
-        if (!importPatternCategory) return false;
         const std::size_t importBase = PatternLibrary::size() + userPatterns.size();
         if (selectedPatternIndex < importBase) return false;
         index = selectedPatternIndex - importBase;
         return index < importPatterns.size();
+    };
+
+    auto selectedPatternMetadataKey = [&](std::string& key) {
+        std::size_t index = 0;
+        if (selectedUserPattern(index)) {
+            key = userPatternKey(index);
+            return true;
+        }
+        if (selectedImportPattern(index)) {
+            key = importPatternKey(index);
+            return true;
+        }
+        key.clear();
+        return false;
+    };
+
+    auto externalPatternName = [&](std::size_t encodedIndex) -> const std::string& {
+        const std::size_t userBase = PatternLibrary::size();
+        const std::size_t importBase = userBase + userPatterns.size();
+        if (encodedIndex >= userBase && encodedIndex < importBase)
+            return userPatterns.at(encodedIndex - userBase).name;
+        return importPatterns.at(encodedIndex - importBase).name;
+    };
+
+    auto favoritePatternIndices = [&]() {
+        std::vector<std::size_t> indices;
+        indices.reserve(userPatterns.size() + importPatterns.size());
+        for (std::size_t i = 0; i < userPatterns.size(); ++i) {
+            if (patternMetadata.isFavorite(userPatternKey(i)))
+                indices.push_back(PatternLibrary::size() + i);
+        }
+        const std::size_t importBase = PatternLibrary::size() + userPatterns.size();
+        for (std::size_t i = 0; i < importPatterns.size(); ++i) {
+            if (patternMetadata.isFavorite(importPatternKey(i)))
+                indices.push_back(importBase + i);
+        }
+        std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
+            const std::string& nameA = externalPatternName(a);
+            const std::string& nameB = externalPatternName(b);
+            if (nameA != nameB) return nameA < nameB;
+            return a < b;
+        });
+        return indices;
     };
 
     auto ensureUserPatternVisible = [&](std::size_t index) {
@@ -344,12 +403,64 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         importPatternScrollOffset = std::clamp(importPatternScrollOffset, 0, maxOffset);
     };
 
+    auto ensureFavoritePatternVisible = [&](std::size_t encodedIndex) {
+        const std::vector<std::size_t> favorites = favoritePatternIndices();
+        const auto it = std::find(favorites.begin(), favorites.end(), encodedIndex);
+        if (it == favorites.end()) return;
+
+        const int row = static_cast<int>(std::distance(favorites.begin(), it));
+        if (row < favoritePatternScrollOffset) favoritePatternScrollOffset = row;
+        else if (row >= favoritePatternScrollOffset + PatternListScroll::VisibleRows)
+            favoritePatternScrollOffset = row - PatternListScroll::VisibleRows + 1;
+        const int maxOffset = std::max(
+            0, static_cast<int>(favorites.size()) - PatternListScroll::VisibleRows);
+        favoritePatternScrollOffset = std::clamp(favoritePatternScrollOffset, 0, maxOffset);
+    };
+
+    auto toggleSelectedFavorite = [&]() {
+        std::string key;
+        if (!selectedPatternMetadataKey(key)) return;
+
+        const bool wasFavorite = patternMetadata.isFavorite(key);
+        std::vector<std::size_t> before;
+        std::size_t oldFavoritePosition = 0;
+        if (favoritePatternCategory && wasFavorite) {
+            before = favoritePatternIndices();
+            const auto it = std::find(before.begin(), before.end(), selectedPatternIndex);
+            if (it != before.end())
+                oldFavoritePosition = static_cast<std::size_t>(std::distance(before.begin(), it));
+        }
+
+        std::string errorMessage;
+        if (!patternMetadata.setFavorite(key, !wasFavorite, errorMessage)) {
+            FileDialog::showError(errorMessage);
+            return;
+        }
+
+        if (favoritePatternCategory && wasFavorite) {
+            const std::vector<std::size_t> after = favoritePatternIndices();
+            if (after.empty()) {
+                selectedPatternIndex = 0;
+                favoritePatternScrollOffset = 0;
+            } else {
+                const std::size_t next = std::min(oldFavoritePosition, after.size() - 1);
+                selectedPatternIndex = after[next];
+                ensureFavoritePatternVisible(selectedPatternIndex);
+            }
+            patternRotation = 0;
+        }
+
+        rememberedPatternIndex = selectedPatternIndex;
+        rememberedPatternRotation = patternRotation;
+    };
+
     auto renameSelectedPattern = [&]() {
         std::size_t index = 0;
         const bool isUser = selectedUserPattern(index);
         const bool isImport = !isUser && selectedImportPattern(index);
         if (!isUser && !isImport) return;
 
+        const std::string oldMetadataKey = isUser ? userPatternKey(index) : importPatternKey(index);
         std::string newName = isUser ? userPatterns.at(index).name : importPatterns.at(index).name;
         if (!TextInputDialog::show(
                 GetMainWindowHandle(), "Rename Pattern", "New name:", newName)) {
@@ -368,12 +479,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             return;
         }
 
+        const std::string newMetadataKey = isUser
+            ? userPatternKey(renamedIndex)
+            : importPatternKey(renamedIndex);
+        std::string metadataError;
+        if (!patternMetadata.renameKey(oldMetadataKey, newMetadataKey, metadataError) &&
+            !metadataError.empty()) {
+            FileDialog::showError(metadataError);
+        }
+
         if (isUser) {
             selectedPatternIndex = PatternLibrary::size() + renamedIndex;
-            ensureUserPatternVisible(renamedIndex);
+            if (favoritePatternCategory) ensureFavoritePatternVisible(selectedPatternIndex);
+            else ensureUserPatternVisible(renamedIndex);
         } else {
             selectedPatternIndex = PatternLibrary::size() + userPatterns.size() + renamedIndex;
-            ensureImportPatternVisible(renamedIndex);
+            if (favoritePatternCategory) ensureFavoritePatternVisible(selectedPatternIndex);
+            else ensureImportPatternVisible(renamedIndex);
         }
         rememberedPatternIndex = selectedPatternIndex;
         rememberedPatternRotation = patternRotation;
@@ -385,6 +507,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         const bool isUser = selectedUserPattern(index);
         const bool isImport = !isUser && selectedImportPattern(index);
         if (!isUser && !isImport) return;
+
+        const std::string metadataKey = isUser ? userPatternKey(index) : importPatternKey(index);
+        std::size_t oldFavoritePosition = 0;
+        if (favoritePatternCategory) {
+            const std::vector<std::size_t> favorites = favoritePatternIndices();
+            const auto it = std::find(favorites.begin(), favorites.end(), selectedPatternIndex);
+            if (it != favorites.end())
+                oldFavoritePosition = static_cast<std::size_t>(std::distance(favorites.begin(), it));
+        }
 
         const int answer = MessageBoxW(
             GetMainWindowHandle(),
@@ -406,7 +537,21 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             return;
         }
 
-        if (isUser) {
+        std::string metadataError;
+        if (!patternMetadata.removeKey(metadataKey, metadataError) && !metadataError.empty())
+            FileDialog::showError(metadataError);
+
+        if (favoritePatternCategory) {
+            const std::vector<std::size_t> favorites = favoritePatternIndices();
+            if (favorites.empty()) {
+                selectedPatternIndex = 0;
+                favoritePatternScrollOffset = 0;
+            } else {
+                const std::size_t next = std::min(oldFavoritePosition, favorites.size() - 1);
+                selectedPatternIndex = favorites[next];
+                ensureFavoritePatternVisible(selectedPatternIndex);
+            }
+        } else if (isUser) {
             if (userPatterns.size() == 0) {
                 selectedPatternIndex = 0;
             } else {
@@ -659,6 +804,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             selectionMode = false;
             selection.clear();
             shapeDragActive = false;
+            userPatternCategory = false;
+            importPatternCategory = false;
+            favoritePatternCategory = false;
             if (shift) selectedPatternIndex = (selectedPatternIndex + PatternLibrary::size() - 1) % PatternLibrary::size();
             else selectedPatternIndex = (selectedPatternIndex + 1) % PatternLibrary::size();
             patternRotation = 0;
@@ -718,6 +866,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const int importRows = static_cast<int>(importPatterns.size()) + 1;
                 const int maxOffset = std::max(0, importRows - PatternListScroll::VisibleRows);
                 importPatternScrollOffset = std::clamp(importPatternScrollOffset - wheel, 0, maxOffset);
+            } else if (favoritePatternCategory) {
+                const int count = static_cast<int>(favoritePatternIndices().size());
+                const int maxOffset = std::max(0, count - PatternListScroll::VisibleRows);
+                favoritePatternScrollOffset = std::clamp(favoritePatternScrollOffset - wheel, 0, maxOffset);
             } else patternListScroll.scroll(toolCategory, wheel);
         }
 
@@ -806,8 +958,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     leftX = PanelContentX + column * 144;
                     top = 86 + row * 36;
                 } else {
-                    constexpr int thirdGap = 6;
-                    constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                    constexpr int thirdGap = 4;
+                    constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
                     leftX = PanelContentX;
                     top = 86 + 2 * 36;
                     width = thirdWidth;
@@ -817,6 +969,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                     selection.clear();
                     userPatternCategory = false;
                     importPatternCategory = false;
+                    favoritePatternCategory = false;
                     toolCategory = ToolCategories[i];
                     selectedPatternIndex = firstPatternInCategory(toolCategory);
                     patternRotation = 0;
@@ -828,15 +981,17 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
             }
 
             if (!handled && panelTab == PanelTab::Pattern) {
-                constexpr int thirdGap = 6;
-                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                constexpr int thirdGap = 4;
+                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
                 const int top = 86 + 2 * 36;
                 const int userLeft = PanelContentX + thirdWidth + thirdGap;
                 const int importLeft = PanelContentX + (thirdWidth + thirdGap) * 2;
+                const int favoriteLeft = PanelContentX + (thirdWidth + thirdGap) * 3;
 
                 if (inRect(mouseX, mouseY, userLeft, top, userLeft + thirdWidth, top + 28)) {
                     userPatternCategory = true;
                     importPatternCategory = false;
+                    favoritePatternCategory = false;
                     patternRotation = 0;
                     selectedPatternIndex = userPatterns.size() > 0 ? PatternLibrary::size() : 0;
                     rememberedPatternIndex = selectedPatternIndex;
@@ -845,10 +1000,22 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 } else if (inRect(mouseX, mouseY, importLeft, top, importLeft + thirdWidth, top + 28)) {
                     userPatternCategory = false;
                     importPatternCategory = true;
+                    favoritePatternCategory = false;
                     patternRotation = 0;
                     selectedPatternIndex = importPatterns.size() > 0
                         ? PatternLibrary::size() + userPatterns.size()
                         : 0;
+                    rememberedPatternIndex = selectedPatternIndex;
+                    rememberedPatternRotation = 0;
+                    handled = true;
+                } else if (inRect(mouseX, mouseY, favoriteLeft, top, favoriteLeft + thirdWidth, top + 28)) {
+                    userPatternCategory = false;
+                    importPatternCategory = false;
+                    favoritePatternCategory = true;
+                    patternRotation = 0;
+                    const std::vector<std::size_t> favorites = favoritePatternIndices();
+                    selectedPatternIndex = favorites.empty() ? 0 : favorites.front();
+                    favoritePatternScrollOffset = 0;
                     rememberedPatternIndex = selectedPatternIndex;
                     rememberedPatternRotation = 0;
                     handled = true;
@@ -893,7 +1060,25 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 }
             }
 
-            if (!handled && panelTab == PanelTab::Pattern && !userPatternCategory && !importPatternCategory) {
+            if (!handled && panelTab == PanelTab::Pattern && favoritePatternCategory) {
+                const std::vector<std::size_t> favorites = favoritePatternIndices();
+                for (std::size_t i = 0; i < favorites.size(); ++i) {
+                    const int row = static_cast<int>(i) - favoritePatternScrollOffset;
+                    if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                    const int top = PatternListY + row * PatternRowHeight;
+                    if (inRect(mouseX, mouseY, PanelContentX, top, WindowWidth - PanelPadding, top + 24)) {
+                        selectedPatternIndex = favorites[i];
+                        patternRotation = 0;
+                        rememberedPatternIndex = selectedPatternIndex;
+                        rememberedPatternRotation = 0;
+                        handled = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!handled && panelTab == PanelTab::Pattern &&
+                !userPatternCategory && !importPatternCategory && !favoritePatternCategory) {
                 const int scrollOffset = patternListScroll.offset(toolCategory);
                 int categoryRow = 0;
                 for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
@@ -918,6 +1103,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 std::size_t managedIndex = 0;
                 const bool canManage = selectedUserPattern(managedIndex) || selectedImportPattern(managedIndex);
                 if (canManage && inRect(
+                        mouseX, mouseY,
+                        PatternFavoriteX, PatternManageY,
+                        PatternFavoriteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight)) {
+                    toggleSelectedFavorite();
+                    handled = true;
+                } else if (canManage && inRect(
                         mouseX, mouseY,
                         PatternRenameX, PatternManageY,
                         PatternRenameX + PatternManageButtonWidth, PatternManageY + PatternManageHeight)) {
@@ -1244,35 +1435,43 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 leftX = PanelContentX + column * 144;
                 top = 86 + row * 36;
             } else {
-                constexpr int thirdGap = 6;
-                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+                constexpr int thirdGap = 4;
+                constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
                 leftX = PanelContentX;
                 top = 86 + 2 * 36;
                 width = thirdWidth;
             }
             DrawBox(leftX, top, leftX + width, top + 28,
-                    !userPatternCategory && !importPatternCategory && selectedPatternIndex != 0 && toolCategory == ToolCategories[i]
+                    !userPatternCategory && !importPatternCategory && !favoritePatternCategory &&
+                    selectedPatternIndex != 0 && toolCategory == ToolCategories[i]
                         ? selected : section, TRUE);
             DrawString(leftX + 8, top + 6, PatternLibrary::categoryName(ToolCategories[i]), text);
         }
 
         if (panelTab == PanelTab::Pattern) {
-            constexpr int thirdGap = 6;
-            constexpr int thirdWidth = (PanelContentWidth - thirdGap * 2) / 3;
+            constexpr int thirdGap = 4;
+            constexpr int thirdWidth = (PanelContentWidth - thirdGap * 3) / 4;
             const int top = 86 + 2 * 36;
             const int userLeft = PanelContentX + thirdWidth + thirdGap;
             const int importLeft = PanelContentX + (thirdWidth + thirdGap) * 2;
+            const int favoriteLeft = PanelContentX + (thirdWidth + thirdGap) * 3;
             DrawBox(userLeft, top, userLeft + thirdWidth, top + 28, userPatternCategory ? selected : section, TRUE);
-            DrawString(userLeft + 8, top + 6, "User", text);
+            DrawString(userLeft + 7, top + 6, "User", text);
             DrawBox(importLeft, top, importLeft + thirdWidth, top + 28, importPatternCategory ? selected : section, TRUE);
-            DrawString(importLeft + 8, top + 6, "Import", text);
+            DrawString(importLeft + 5, top + 6, "Import", text);
+            DrawBox(favoriteLeft, top, favoriteLeft + thirdWidth, top + 28, favoritePatternCategory ? selected : section, TRUE);
+            DrawString(favoriteLeft + 13, top + 6, "Fav", text);
         }
 
         const int scrollOffset = userPatternCategory
             ? userPatternScrollOffset
-            : (importPatternCategory ? importPatternScrollOffset : patternListScroll.offset(toolCategory));
+            : (importPatternCategory
+                ? importPatternScrollOffset
+                : (favoritePatternCategory ? favoritePatternScrollOffset : patternListScroll.offset(toolCategory)));
         int categoryRow = 0;
-        if (panelTab == PanelTab::Pattern && !userPatternCategory && !importPatternCategory) for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
+        if (panelTab == PanelTab::Pattern &&
+            !userPatternCategory && !importPatternCategory && !favoritePatternCategory)
+            for (std::size_t i = 1; i < PatternLibrary::size(); ++i) {
             const LifePattern& pattern = PatternLibrary::at(i);
             if (pattern.category != toolCategory) continue;
             if (categoryRow >= scrollOffset && categoryRow < scrollOffset + PatternListScroll::VisibleRows) {
@@ -1291,6 +1490,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 const std::size_t encoded = PatternLibrary::size() + i;
                 DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24, selectedPatternIndex == encoded ? selected : section, TRUE);
                 DrawString(PanelContentX + 8, top + 5, userPatterns.at(i).name.c_str(), text);
+                if (patternMetadata.isFavorite(userPatternKey(i)))
+                    DrawString(WindowWidth - PanelPadding - 16, top + 5, "*", text);
             }
         }
 
@@ -1311,6 +1512,24 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
                 DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24,
                         selectedPatternIndex == encoded ? selected : section, TRUE);
                 DrawString(PanelContentX + 8, top + 5, importPatterns.at(importIndex).name.c_str(), text);
+                if (patternMetadata.isFavorite(importPatternKey(importIndex)))
+                    DrawString(WindowWidth - PanelPadding - 16, top + 5, "*", text);
+            }
+        }
+
+        if (panelTab == PanelTab::Pattern && favoritePatternCategory) {
+            const std::vector<std::size_t> favorites = favoritePatternIndices();
+            const std::size_t importBase = PatternLibrary::size() + userPatterns.size();
+            for (std::size_t i = 0; i < favorites.size(); ++i) {
+                const int row = static_cast<int>(i) - favoritePatternScrollOffset;
+                if (row < 0 || row >= PatternListScroll::VisibleRows) continue;
+                const int top = PatternListY + row * PatternRowHeight;
+                const std::size_t encoded = favorites[i];
+                DrawBox(PanelContentX, top, WindowWidth - PanelPadding, top + 24,
+                        selectedPatternIndex == encoded ? selected : section, TRUE);
+                const char* source = encoded < importBase ? "U" : "I";
+                DrawFormatString(PanelContentX + 8, top + 5, text, "[%s] %s",
+                                 source, externalPatternName(encoded).c_str());
             }
         }
 
@@ -1328,7 +1547,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         } else {
             const int patternCount = userPatternCategory
                 ? static_cast<int>(userPatterns.size())
-                : patternListScroll.count(toolCategory);
+                : (favoritePatternCategory
+                    ? static_cast<int>(favoritePatternIndices().size())
+                    : patternListScroll.count(toolCategory));
             if (panelTab == PanelTab::Pattern && patternCount > PatternListScroll::VisibleRows) {
                 const int firstVisible = scrollOffset + 1;
                 const int lastVisible = std::min(scrollOffset + PatternListScroll::VisibleRows, patternCount);
@@ -1382,14 +1603,21 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (panelTab == PanelTab::Pattern) {
             std::size_t managedIndex = 0;
             const bool canManage = selectedUserPattern(managedIndex) || selectedImportPattern(managedIndex);
+            std::string metadataKey;
+            const bool favorite = canManage && selectedPatternMetadataKey(metadataKey) &&
+                                  patternMetadata.isFavorite(metadataKey);
+            DrawBox(PatternFavoriteX, PatternManageY,
+                    PatternFavoriteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
+                    favorite ? selected : (canManage ? section : background), TRUE);
             DrawBox(PatternRenameX, PatternManageY,
                     PatternRenameX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
                     canManage ? section : background, TRUE);
             DrawBox(PatternDeleteX, PatternManageY,
                     PatternDeleteX + PatternManageButtonWidth, PatternManageY + PatternManageHeight,
                     canManage ? section : background, TRUE);
-            DrawString(PatternRenameX + 10, PatternManageY + 6, "RENAME", canManage ? text : muted);
-            DrawString(PatternDeleteX + 10, PatternManageY + 6, "DELETE", canManage ? text : muted);
+            DrawString(PatternFavoriteX + 8, PatternManageY + 6, favorite ? "* FAV" : "FAV", canManage ? text : muted);
+            DrawString(PatternRenameX + 8, PatternManageY + 6, "RENAME", canManage ? text : muted);
+            DrawString(PatternDeleteX + 8, PatternManageY + 6, "DELETE", canManage ? text : muted);
 
             DrawString(PanelContentX, RotationLabelY, "ROTATION", muted);
             const bool rotationEnabled = selectedPatternIndex != 0;

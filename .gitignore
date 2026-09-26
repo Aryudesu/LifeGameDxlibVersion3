@@ -7,3 +7,5 @@ x64/
 *.VC.db
 *.VC.VC.opendb
 patterns/user/*.rle
+patterns/import/*.rle
+patterns/metadata.json

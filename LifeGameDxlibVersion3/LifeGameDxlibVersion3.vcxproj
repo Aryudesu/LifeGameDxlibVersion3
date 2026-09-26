@@ -38,6 +38,7 @@
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="PatternLibrary.cpp" />
     <ClCompile Include="PatternListScroll.cpp" />
+    <ClCompile Include="PatternMetadataStore.cpp" />
     <ClCompile Include="RleParser.cpp" />
     <ClCompile Include="TextInputDialog.cpp" />
     <ClCompile Include="UserPatternLibrary.cpp" />
@@ -53,6 +54,7 @@
     <ClInclude Include="LifeStepSelfTest.h" />
     <ClInclude Include="PatternLibrary.h" />
     <ClInclude Include="PatternListScroll.h" />
+    <ClInclude Include="PatternMetadataStore.h" />
     <ClInclude Include="PatternPlacementPreview.h" />
     <ClInclude Include="PerformanceLogger.h" />
     <ClInclude Include="RleParser.h" />
